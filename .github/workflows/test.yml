@@ -1,0 +1,44 @@
+name: Pre-Deploy Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Syntax check
+        run: |
+          python -m compileall bot
+          echo "✅ syntax OK"
+
+      - name: Import check
+        env:
+          TELEGRAM_BOT_TOKEN: dummy
+          GROQ_API_KEY: dummy
+          GOOGLE_DRIVE_FOLDER_ID: dummy
+          GOOGLE_SERVICE_ACCOUNT_JSON: '{"type":"service_account","project_id":"x","private_key_id":"x","private_key":"-----BEGIN RSA PRIVATE KEY-----\nMIIBoQIBAAJBAKdummy\n-----END RSA PRIVATE KEY-----\n","client_email":"x@x.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}'
+        run: |
+          python -c "
+          from bot.config import TELEGRAM_TOKEN, SANDBOX_PATH
+          from bot.services.sandbox import SandboxStorage
+          s = SandboxStorage('/tmp/ci_test')
+          s.write_text('t.txt', 'ok')
+          assert s.exists('t.txt')
+          print('✅ imports + sandbox OK')
+          "
