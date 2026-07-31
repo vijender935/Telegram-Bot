@@ -1,0 +1,67 @@
+import sqlite3
+import json
+import threading
+from langchain_core.messages import HumanMessage, AIMessage
+
+
+class MemoryStore:
+    """SQLite-backed persistent chat history per user."""
+
+    def __init__(self, db_path: str = "/tmp/bot_memory.db"):
+        self.db_path = db_path
+        self._lock = threading.Lock()
+        self._init_db()
+
+    def _init_db(self):
+        with self._connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memories (
+                    user_id INTEGER PRIMARY KEY,
+                    history TEXT NOT NULL DEFAULT '[]'
+                )
+            """)
+
+    def _connect(self):
+        return sqlite3.connect(self.db_path, check_same_thread=False)
+
+    def get(self, user_id: int) -> list:
+        with self._lock:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT history FROM memories WHERE user_id = ?",
+                    (user_id,)
+                ).fetchone()
+        if not row:
+            return []
+        raw = json.loads(row[0])
+        messages = []
+        for m in raw:
+            if m["type"] == "human":
+                messages.append(HumanMessage(content=m["content"]))
+            elif m["type"] == "ai":
+                messages.append(AIMessage(content=m["content"]))
+        return messages
+
+    def save(self, user_id: int, history: list, max_messages: int = 20):
+        history = history[-max_messages:]
+        raw = []
+        for m in history:
+            if isinstance(m, HumanMessage):
+                raw.append({"type": "human", "content": m.content})
+            elif isinstance(m, AIMessage):
+                raw.append({"type": "ai", "content": m.content})
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("""
+                    INSERT INTO memories (user_id, history)
+                    VALUES (?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET history = excluded.history
+                """, (user_id, json.dumps(raw)))
+
+    def clear(self, user_id: int):
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute(
+                    "DELETE FROM memories WHERE user_id = ?",
+                    (user_id,)
+                )

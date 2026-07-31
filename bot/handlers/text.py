@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage
 
 logger = logging.getLogger(__name__)
-user_memories: dict = {}
+
 
 DRIVE_KEYWORDS = [
     "drive", "folder", "map", "list", "files",
@@ -39,6 +39,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     drive = context.application.bot_data["drive"]
     sandbox = context.application.bot_data["sandbox"]
     agent = context.application.bot_data["agent"]
+    memory = context.application.bot_data["memory"]   # ← NEW
 
     uid = update.effective_user.id
     text = (update.message.text or "").strip()
@@ -46,16 +47,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Kuch toh bol yaar 😏")
         return
 
-    history = user_memories.setdefault(uid, [])
+    history = memory.get(uid)   # ← dict se SQLite
     low = text.lower()
 
-    # "3 download" / "download 3"
     m = re.search(r"(?:download\s+(\d+)|(\d+)\s*download)", low)
     if m:
         await send_download(update, drive, sandbox, int(m.group(1) or m.group(2)))
         return
 
-    # Drive list
     if any(k in low for k in DRIVE_KEYWORDS):
         sub = "root"
         for folder in ["insta", "picture", "pdf", "audio", "other", "tosspage"]:
@@ -67,13 +66,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_long_text(update, drive.list_files(sub))
         return
 
-    # Sexy chat agent
     try:
         result = await agent.ainvoke({"input": text, "chat_history": history})
         reply = result.get("output") or "Kuch samajh nahi aaya."
         history.append(HumanMessage(content=text))
         history.append(AIMessage(content=reply))
-        user_memories[uid] = history[-20:]
+        memory.save(uid, history)   # ← dict update ki jagah
         await send_long_text(update, reply)
     except Exception as e:
         logger.exception("handle_text failed")
@@ -83,7 +81,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_memories[update.effective_user.id] = []
+    memory = context.application.bot_data["memory"]
+    memory.clear(update.effective_user.id)   # ← NEW
     await update.message.reply_text(
         "Hlo baby 😈\n\n"
         "• Map folder list karo\n"
@@ -94,5 +93,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_memories[update.effective_user.id] = []
+    memory = context.application.bot_data["memory"]
+    memory.clear(update.effective_user.id)   # ← NEW
     await update.message.reply_text("Memory saaf 🔥")
