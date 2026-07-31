@@ -23,8 +23,12 @@ async def send_long_text(update: Update, text: str):
 
 
 async def send_download(update: Update, drive, sandbox, serial: int):
+<<<<<<< HEAD
     await update.message.reply_text(f"{serial} download ho raha hai ⏬...")
 
+=======
+    # ✅ Koi "downloading..." message nahi — silently process karo
+>>>>>>> 5336183 (Adding Transcript)
     status, msg = drive.download_by_serial(serial, sandbox)
     if status != "ok":
         await update.message.reply_text(msg)
@@ -32,11 +36,16 @@ async def send_download(update: Update, drive, sandbox, serial: int):
 
     path = sandbox.path_for(msg)
     if not path.exists():
+<<<<<<< HEAD
         await update.message.reply_text("File local pe nahi mili.")
+=======
+        await update.message.reply_text("File nahi mili.")
+>>>>>>> 5336183 (Adding Transcript)
         return
 
     size_mb = path.stat().st_size / (1024 * 1024)
     if size_mb > 48:
+<<<<<<< HEAD
         await update.message.reply_text(
             f"File bahut badi hai ({size_mb:.1f} MB).\nTelegram limit \~50MB hai."
         )
@@ -44,6 +53,12 @@ async def send_download(update: Update, drive, sandbox, serial: int):
 
     await update.message.reply_text(f"Bhej raha hu... ({size_mb:.1f} MB) 📤")
 
+=======
+        path.unlink(missing_ok=True)
+        await update.message.reply_text(f"File bahut badi hai ({size_mb:.1f} MB). Telegram limit ~50MB hai.")
+        return
+
+>>>>>>> 5336183 (Adding Transcript)
     name_lower = msg.lower()
     is_video = name_lower.endswith((".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"))
     is_photo = name_lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"))
@@ -63,7 +78,10 @@ async def send_download(update: Update, drive, sandbox, serial: int):
             elif is_photo:
                 await update.message.reply_photo(
                     photo=f,
+<<<<<<< HEAD
                     filename=msg,
+=======
+>>>>>>> 5336183 (Adding Transcript)
                     read_timeout=90,
                     write_timeout=90,
                     connect_timeout=30,
@@ -84,6 +102,7 @@ async def send_download(update: Update, drive, sandbox, serial: int):
                     write_timeout=120,
                     connect_timeout=60,
                 )
+<<<<<<< HEAD
 
     except Exception as e:
         error = str(e)
@@ -96,6 +115,13 @@ async def send_download(update: Update, drive, sandbox, serial: int):
             )
         else:
             await update.message.reply_text(f"Bhej nahi paya: {error[:150]}")
+=======
+    except Exception as e:
+        logger.exception("send_download failed")
+        await update.message.reply_text(f"Error: {str(e)[:150]}")
+    finally:
+        path.unlink(missing_ok=True)  # ✅ Send ke baad file delete — storage free
+>>>>>>> 5336183 (Adding Transcript)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -132,9 +158,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_long_text(update, drive.list_files(sub))
         return
 
+<<<<<<< HEAD
     # Get current mood for this user
     user_moods = context.application.bot_data.get("user_moods", {})
     current_mood = user_moods.get(uid, "Horny / Flirty")
+=======
+    # ✅ Mood SQLite se lo — RAM dict nahi
+    current_mood = memory.get_mood(uid)
+>>>>>>> 5336183 (Adding Transcript)
 
     # Build agent with current mood
     agent = build_agent(llm, tools, current_mood=current_mood)
