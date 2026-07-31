@@ -148,26 +148,56 @@ class DriveService:
         return "\n".join(lines)
 
     def _download_to_path(self, file_id: str, dest: Path, mime: str = "") -> None:
+        """
+        Safe download:
+        - Google Docs / Sheets / Slides → export
+        - Normal files (photo, video, pdf etc.) → media download
+        - Folder → error
+        """
         if not mime:
-            meta = self._service.files().get(fileId=file_id, fields="mimeType").execute()
-            mime = meta.get("mimeType", "")
+            try:
+                meta = self._service.files().get(fileId=file_id, fields="mimeType,name").execute()
+                mime = meta.get("mimeType", "")
+            except Exception:
+                mime = ""
 
-        if mime.startswith("application/vnd.google-apps."):
-            export = "text/plain"
-            if "spreadsheet" in mime:
-                export = "text/csv"
-            elif "presentation" in mime:
-                export = "application/pdf"
-            data = self._service.files().export(fileId=file_id, mimeType=export).execute()
-            raw = data if isinstance(data, bytes) else data.encode("utf-8")
-            dest.write_bytes(raw)
-        else:
-            req = self._service.files().get_media(fileId=file_id)
-            with open(dest, "wb") as fh:
-                dl = MediaIoBaseDownload(fh, req)
-                done = False
-                while not done:
-                    _, done = dl.next_chunk()
+        # Folder download nahi kar sakte
+        if mime == "application/vnd.google-apps.folder":
+            raise ValueError("Yeh folder hai, file nahi. Folder download nahi hota.")
+
+        try:
+            if mime.startswith("application/vnd.google-apps."):
+                # Google Workspace files
+                export_mime = "text/plain"
+                if "spreadsheet" in mime:
+                    export_mime = "text/csv"
+                elif "presentation" in mime:
+                    export_mime = "application/pdf"
+                elif "document" in mime:
+                    export_mime = "text/plain"
+
+                data = self._service.files().export(
+                    fileId=file_id,
+                    mimeType=export_mime
+                ).execute()
+
+                raw = data if isinstance(data, bytes) else str(data).encode("utf-8")
+                dest.write_bytes(raw)
+
+            else:
+                # Normal binary files (images, videos, pdf, audio etc.)
+                request = self._service.files().get_media(fileId=file_id)
+                with open(dest, "wb") as fh:
+                    downloader = MediaIoBaseDownload(fh, request)
+                    done = False
+                    while not done:
+                        _, done = downloader.next_chunk()
+
+            logger.info(f"Downloaded: {dest.name}")
+
+        except Exception as e:
+            logger.exception(f"Download failed | file_id={file_id} | mime={mime}")
+            raise
 
     def download_by_serial(self, serial: int, sandbox) -> tuple[str, str]:
         """Returns ('ok', filename) or ('error', message)."""
@@ -178,13 +208,17 @@ class DriveService:
         if not info:
             return "error", f"Serial {serial} nahi mila. 1–{len(self._last_file_map)} tak hain."
 
+        mime = info.get("mime", "")
+        if mime == "application/vnd.google-apps.folder":
+            return "error", "Yeh folder hai. Folder download nahi hota. Koi file select karo."
+
         dest = sandbox.path_for(info["name"])
         try:
-            self._download_to_path(info["id"], dest, info["mime"])
+            self._download_to_path(info["id"], dest, mime)
             return "ok", info["name"]
         except Exception as e:
             logger.exception("download_by_serial failed")
-            return "error", f"Download fail: {type(e).__name__}: {e}"
+            return "error", f"Download fail: {str(e)[:150]}"
 
     def upload(self, local_path: Path, drive_name: str | None = None) -> str:
         name = drive_name or local_path.name
@@ -217,10 +251,12 @@ class DriveService:
         meta = self._service.files().get(fileId=file_id, fields="name,mimeType").execute()
         name = meta.get("name", "unknown")
         mime = meta.get("mimeType", "")
+
         if "google-apps.document" in mime:
             content = self._service.files().export(fileId=file_id, mimeType="text/plain").execute()
             text = content.decode("utf-8") if isinstance(content, bytes) else str(content)
             return f"File: {name}\n\n{text[:limit]}"
+
         req = self._service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         dl = MediaIoBaseDownload(fh, req)
