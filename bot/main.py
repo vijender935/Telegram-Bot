@@ -51,7 +51,17 @@ async def run_bot():
     tools = build_tools(drive, sandbox)
     agent = build_agent(llm, tools)
 
-    app = Application.builder().token(config.TELEGRAM_TOKEN).build()
+    # Increased timeouts for large file uploads
+    app = (
+        Application.builder()
+        .token(config.TELEGRAM_TOKEN)
+        .read_timeout(60)
+        .write_timeout(60)
+        .connect_timeout(30)
+        .pool_timeout(30)
+        .build()
+    )
+
     app.bot_data["drive"] = drive
     app.bot_data["sandbox"] = sandbox
     app.bot_data["memory"] = memory_store
