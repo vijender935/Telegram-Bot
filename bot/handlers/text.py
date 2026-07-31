@@ -3,6 +3,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage
+from bot.agent.personality import build_agent
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,6 @@ async def send_download(update: Update, drive, sandbox, serial: int):
     try:
         with open(path, "rb") as f:
             if is_video:
-                # Video → Telegram mein playable preview + player
                 await update.message.reply_video(
                     video=f,
                     filename=msg,
@@ -101,8 +101,9 @@ async def send_download(update: Update, drive, sandbox, serial: int):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     drive = context.application.bot_data["drive"]
     sandbox = context.application.bot_data["sandbox"]
-    agent = context.application.bot_data["agent"]
     memory = context.application.bot_data["memory"]
+    llm = context.application.bot_data["llm"]
+    tools = context.application.bot_data["tools"]
 
     uid = update.effective_user.id
     text = (update.message.text or "").strip()
@@ -131,7 +132,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_long_text(update, drive.list_files(sub))
         return
 
-    # Normal AI chat
+    # Get current mood for this user
+    user_moods = context.application.bot_data.get("user_moods", {})
+    current_mood = user_moods.get(uid, "Horny / Flirty")
+
+    # Build agent with current mood
+    agent = build_agent(llm, tools, current_mood=current_mood)
+
     try:
         result = await agent.ainvoke({"input": text, "chat_history": history})
         reply = result.get("output") or "Kuch samajh nahi aaya."
@@ -153,8 +160,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Hlo baby 😈\n\n"
         "• Map folder list karo\n"
         "• Picture folder dikhao\n"
-        "• 3 download karo\n\n"
-        "/drive   /list Insta   /download 2"
+        "• 3 download karo\n"
+        "• /mood se vibe change karo\n\n"
+        "/drive   /list Insta   /download 2   /mood"
     )
 
 
