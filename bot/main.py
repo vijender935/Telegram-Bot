@@ -68,12 +68,7 @@ async def run_bot():
     app.bot_data["agent"] = agent
     app.bot_data["llm"] = llm
     app.bot_data["tools"] = tools
-<<<<<<< HEAD
-    app.bot_data["user_moods"] = {}
-=======
-    app.bot_data["groq_api_key"] = config.GROQ_API_KEY  # ✅ Transcription ke liye
-    # ✅ user_moods dict hata diya — ab SQLite mein save hota hai
->>>>>>> 5336183 (Adding Transcript)
+    app.bot_data["groq_api_key"] = config.GROQ_API_KEY
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))

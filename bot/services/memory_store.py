@@ -5,11 +5,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 
 class MemoryStore:
-<<<<<<< HEAD
-    """SQLite-backed persistent chat history per user."""
-=======
     """SQLite-backed persistent chat history + moods per user."""
->>>>>>> 5336183 (Adding Transcript)
 
     def __init__(self, db_path: str = "/tmp/bot_memory.db"):
         self.db_path = db_path
@@ -24,15 +20,12 @@ class MemoryStore:
                     history TEXT NOT NULL DEFAULT '[]'
                 )
             """)
-<<<<<<< HEAD
-=======
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS moods (
                     user_id INTEGER PRIMARY KEY,
                     mood TEXT NOT NULL DEFAULT 'Horny / Flirty'
                 )
             """)
->>>>>>> 5336183 (Adding Transcript)
 
     def _connect(self):
         return sqlite3.connect(self.db_path, check_same_thread=False)
@@ -42,7 +35,7 @@ class MemoryStore:
             with self._connect() as conn:
                 row = conn.execute(
                     "SELECT history FROM memories WHERE user_id = ?",
-                    (user_id,)
+                    (user_id,),
                 ).fetchone()
         if not row:
             return []
@@ -76,19 +69,15 @@ class MemoryStore:
             with self._connect() as conn:
                 conn.execute(
                     "DELETE FROM memories WHERE user_id = ?",
-                    (user_id,)
-<<<<<<< HEAD
-                )
-=======
+                    (user_id,),
                 )
 
-    # ── Mood methods ──────────────────────────────────────────
     def get_mood(self, user_id: int) -> str:
         with self._lock:
             with self._connect() as conn:
                 row = conn.execute(
                     "SELECT mood FROM moods WHERE user_id = ?",
-                    (user_id,)
+                    (user_id,),
                 ).fetchone()
         return row[0] if row else "Horny / Flirty"
 
@@ -100,4 +89,3 @@ class MemoryStore:
                     VALUES (?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET mood = excluded.mood
                 """, (user_id, mood))
->>>>>>> 5336183 (Adding Transcript)

@@ -7,7 +7,6 @@ from bot.agent.personality import build_agent
 
 logger = logging.getLogger(__name__)
 
-
 DRIVE_KEYWORDS = [
     "drive", "folder", "map", "list", "files",
     "insta", "picture", "pdf", "audio", "other", "tosspage",
@@ -23,12 +22,6 @@ async def send_long_text(update: Update, text: str):
 
 
 async def send_download(update: Update, drive, sandbox, serial: int):
-<<<<<<< HEAD
-    await update.message.reply_text(f"{serial} download ho raha hai ⏬...")
-
-=======
-    # ✅ Koi "downloading..." message nahi — silently process karo
->>>>>>> 5336183 (Adding Transcript)
     status, msg = drive.download_by_serial(serial, sandbox)
     if status != "ok":
         await update.message.reply_text(msg)
@@ -36,29 +29,17 @@ async def send_download(update: Update, drive, sandbox, serial: int):
 
     path = sandbox.path_for(msg)
     if not path.exists():
-<<<<<<< HEAD
-        await update.message.reply_text("File local pe nahi mili.")
-=======
         await update.message.reply_text("File nahi mili.")
->>>>>>> 5336183 (Adding Transcript)
         return
 
     size_mb = path.stat().st_size / (1024 * 1024)
     if size_mb > 48:
-<<<<<<< HEAD
+        path.unlink(missing_ok=True)
         await update.message.reply_text(
-            f"File bahut badi hai ({size_mb:.1f} MB).\nTelegram limit \~50MB hai."
+            f"File bahut badi hai ({size_mb:.1f} MB). Telegram limit ~50MB hai."
         )
         return
 
-    await update.message.reply_text(f"Bhej raha hu... ({size_mb:.1f} MB) 📤")
-
-=======
-        path.unlink(missing_ok=True)
-        await update.message.reply_text(f"File bahut badi hai ({size_mb:.1f} MB). Telegram limit ~50MB hai.")
-        return
-
->>>>>>> 5336183 (Adding Transcript)
     name_lower = msg.lower()
     is_video = name_lower.endswith((".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"))
     is_photo = name_lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"))
@@ -68,60 +49,28 @@ async def send_download(update: Update, drive, sandbox, serial: int):
         with open(path, "rb") as f:
             if is_video:
                 await update.message.reply_video(
-                    video=f,
-                    filename=msg,
-                    supports_streaming=True,
-                    read_timeout=120,
-                    write_timeout=120,
-                    connect_timeout=60,
+                    video=f, filename=msg, supports_streaming=True,
+                    read_timeout=120, write_timeout=120, connect_timeout=60,
                 )
             elif is_photo:
                 await update.message.reply_photo(
-                    photo=f,
-<<<<<<< HEAD
-                    filename=msg,
-=======
->>>>>>> 5336183 (Adding Transcript)
-                    read_timeout=90,
-                    write_timeout=90,
-                    connect_timeout=30,
+                    photo=f, read_timeout=90, write_timeout=90, connect_timeout=30,
                 )
             elif is_audio:
                 await update.message.reply_audio(
-                    audio=f,
-                    filename=msg,
-                    read_timeout=90,
-                    write_timeout=90,
-                    connect_timeout=30,
+                    audio=f, filename=msg,
+                    read_timeout=90, write_timeout=90, connect_timeout=30,
                 )
             else:
                 await update.message.reply_document(
-                    document=f,
-                    filename=msg,
-                    read_timeout=120,
-                    write_timeout=120,
-                    connect_timeout=60,
+                    document=f, filename=msg,
+                    read_timeout=120, write_timeout=120, connect_timeout=60,
                 )
-<<<<<<< HEAD
-
-    except Exception as e:
-        error = str(e)
-        logger.exception("send_download failed")
-        if "Timed out" in error or "timeout" in error.lower():
-            await update.message.reply_text(
-                f"File save ho gayi lekin bhejne mein timeout aa gaya.\n"
-                f"Size: {size_mb:.1f} MB\n"
-                f"Thodi der baad dubara try karo."
-            )
-        else:
-            await update.message.reply_text(f"Bhej nahi paya: {error[:150]}")
-=======
     except Exception as e:
         logger.exception("send_download failed")
         await update.message.reply_text(f"Error: {str(e)[:150]}")
     finally:
-        path.unlink(missing_ok=True)  # ✅ Send ke baad file delete — storage free
->>>>>>> 5336183 (Adding Transcript)
+        path.unlink(missing_ok=True)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -140,13 +89,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     history = memory.get(uid)
     low = text.lower()
 
-    # Download by number
     m = re.search(r"(?:download\s+(\d+)|(\d+)\s*download)", low)
     if m:
         await send_download(update, drive, sandbox, int(m.group(1) or m.group(2)))
         return
 
-    # Drive keywords
     if any(k in low for k in DRIVE_KEYWORDS):
         sub = "root"
         for folder in ["insta", "picture", "pdf", "audio", "other", "tosspage"]:
@@ -158,16 +105,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_long_text(update, drive.list_files(sub))
         return
 
-<<<<<<< HEAD
-    # Get current mood for this user
-    user_moods = context.application.bot_data.get("user_moods", {})
-    current_mood = user_moods.get(uid, "Horny / Flirty")
-=======
-    # ✅ Mood SQLite se lo — RAM dict nahi
     current_mood = memory.get_mood(uid)
->>>>>>> 5336183 (Adding Transcript)
-
-    # Build agent with current mood
     agent = build_agent(llm, tools, current_mood=current_mood)
 
     try:
