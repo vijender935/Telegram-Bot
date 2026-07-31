@@ -75,7 +75,7 @@ async def run_bot():
     app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CommandHandler("upload", cmd_upload))
     app.add_handler(CommandHandler("delete", cmd_delete))
-    app.add_handler(MessageHandler(filters.TEXT & \~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
