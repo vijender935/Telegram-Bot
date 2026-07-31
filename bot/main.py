@@ -3,7 +3,7 @@ import logging
 import threading
 
 from flask import Flask
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from langchain_groq import ChatGroq
 
 from bot import config
@@ -17,6 +17,7 @@ from bot.handlers.media import handle_document, handle_photo, handle_voice
 from bot.handlers.commands import (
     cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
 )
+from bot.handlers.mood import cmd_mood, mood_callback
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -51,7 +52,6 @@ async def run_bot():
     tools = build_tools(drive, sandbox)
     agent = build_agent(llm, tools)
 
-    # Increased timeouts for large file uploads
     app = (
         Application.builder()
         .token(config.TELEGRAM_TOKEN)
@@ -66,16 +66,21 @@ async def run_bot():
     app.bot_data["sandbox"] = sandbox
     app.bot_data["memory"] = memory_store
     app.bot_data["agent"] = agent
+    app.bot_data["llm"] = llm
+    app.bot_data["tools"] = tools
+    app.bot_data["user_moods"] = {}
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
+    app.add_handler(CommandHandler("mood", cmd_mood))
+    app.add_handler(CallbackQueryHandler(mood_callback, pattern="^mood_"))
     app.add_handler(CommandHandler("drive", cmd_drive))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("download", cmd_download))
     app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CommandHandler("upload", cmd_upload))
     app.add_handler(CommandHandler("delete", cmd_delete))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.TEXT & \~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
