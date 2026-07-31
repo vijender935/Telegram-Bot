@@ -51,7 +51,17 @@ async def run_bot():
     tools = build_tools(drive, sandbox)
     agent = build_agent(llm, tools)
 
-    app = Application.builder().token(config.TELEGRAM_TOKEN).build()
+    # Increased timeouts for large file uploads
+    app = (
+        Application.builder()
+        .token(config.TELEGRAM_TOKEN)
+        .read_timeout(60)
+        .write_timeout(60)
+        .connect_timeout(30)
+        .pool_timeout(30)
+        .build()
+    )
+
     app.bot_data["drive"] = drive
     app.bot_data["sandbox"] = sandbox
     app.bot_data["memory"] = memory_store
@@ -65,7 +75,7 @@ async def run_bot():
     app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CommandHandler("upload", cmd_upload))
     app.add_handler(CommandHandler("delete", cmd_delete))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.TEXT & \~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
