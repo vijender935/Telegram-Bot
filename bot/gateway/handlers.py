@@ -217,11 +217,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     history = memory.get_history(uid)
     mood = memory.get_mood(uid)
     profile = memory.get_profile(uid)
-    agent = build_chat_agent(llm, tools, current_mood=mood, user_profile=profile)
+    chain = build_chat_agent(llm, tools, current_mood=mood, user_profile=profile)
 
     try:
-        result = await agent.ainvoke({"input": text, "chat_history": history})
-        reply = result.get("output") or "Kuch samajh nahi aaya."
+        reply = await chain.ainvoke({"input": text, "chat_history": history})
+        if not reply or not str(reply).strip():
+            reply = "Hmm... bol na, sun rahi hoon 😏"
         history.append(HumanMessage(content=text))
         history.append(AIMessage(content=reply))
         memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
