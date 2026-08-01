@@ -11,19 +11,24 @@ def build_chat_agent(
     tools: list,
     current_mood: str,
     user_profile: dict | None = None,
+    session_summary: str = "",
+    last_media: str = "",
+    active_fantasy: str = "",
+    emotion: str = "neutral",
 ):
-    """Build a simple chat chain (no tools / no agent).
-    Pure conversation follows the system prompt much more reliably.
-    """
+    """Simple chat chain with rich context injection."""
     system = SYSTEM_PROMPT.format(
         current_mood=current_mood or "Horny / Flirty",
         user_profile=profile_to_prompt_text(user_profile),
+        session_summary=session_summary or "(no session summary yet)",
+        last_media=last_media or "(no recent media shared)",
+        active_fantasy=active_fantasy or "(none)",
+        emotion=emotion or "neutral",
     )
     prompt = ChatPromptTemplate.from_messages([
         ("system", system),
         MessagesPlaceholder("chat_history"),
         ("human", "{input}"),
     ])
-    # Simple chain — no AgentExecutor, no scratchpad, no tool-calling format
     chain = prompt | llm | StrOutputParser()
     return chain
