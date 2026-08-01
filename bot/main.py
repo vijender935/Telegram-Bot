@@ -54,7 +54,7 @@ async def run_bot():
     llm = ChatGroq(
         model=config.GROQ_MODEL,
         groq_api_key=config.GROQ_API_KEY,
-        temperature=0.7,
+        temperature=0.85,
     )
     tools = build_tools()
 
