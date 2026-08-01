@@ -243,7 +243,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _transcribe_and_reply(update, context, file_bytes: bytes, filename: str, label: str):
-    """Shared path: show status → whisper → save memory → reply."""
+    """Shared path: show status → whisper → save memory → reply (chunked)."""
     memory = context.application.bot_data["memory"]
     groq_key = context.application.bot_data.get("groq_api_key")
     uid = update.effective_user.id
@@ -255,13 +255,31 @@ async def _transcribe_and_reply(update, context, file_bytes: bytes, filename: st
     status = await update.message.reply_text(f"🎧 {label} sun rahi hoon, transcript bana rahi hoon…")
     try:
         transcript = await transcribe_audio(file_bytes, filename, groq_key)
+        # History mein pure transcript mat daalo — bohot lamba ho sakta hai
+        preview = transcript if len(transcript) <= 1500 else transcript[:1500] + "…"
         h = memory.get_history(uid)
-        h.append(HumanMessage(content=f"[{label}]\nTranscript: {transcript}"))
+        h.append(HumanMessage(content=f"[{label}]\nTranscript: {preview}"))
         memory.save_history(uid, h)
-        await status.edit_text(f"📝 Transcript:\n\n{transcript}")
+        try:
+            await status.edit_text("📝 Transcript ready:")
+        except Exception:
+            pass
+        await send_long_text(update, transcript)
     except Exception as e:
         logger.exception("transcribe failed")
-        await status.edit_text(f"Transcript fail 😤\n{str(e)[:250]}")
+        err = str(e)
+        # Telegram Message_too_long kabhi exception message mein aata hai
+        if "Message_too_long" in err or "too long" in err.lower():
+            await status.edit_text("Transcript bahut lamba tha — chunks mein bhej rahi hoon…")
+            # last successful path unlikely; just report
+            await update.message.reply_text(
+                "Transcript fail: message limit. Chhota audio try karo ya dubara bhejo."
+            )
+        else:
+            try:
+                await status.edit_text(f"Transcript fail 😤\n{err[:250]}")
+            except Exception:
+                await update.message.reply_text(f"Transcript fail 😤\n{err[:250]}")
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -486,7 +504,11 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             h.append(HumanMessage(content=f"[file:{name}]\nTranscript: {transcript}"))
             memory.save_history(query.from_user.id, h)
             context.user_data.pop("pending_file", None)
-            await query.edit_message_text(f"📝 Transcript:\n\n{transcript[:3500]}")
+            await query.edit_message_text("📝 Transcript ready:")
+            chat_id = query.message.chat_id
+            chunk = transcript
+            for j in range(0, len(chunk), 4000):
+                await context.bot.send_message(chat_id, chunk[j:j + 4000])
         except Exception as e:
             logger.exception("fileact transcribe")
             await query.edit_message_text(f"Fail: {str(e)[:200]}")

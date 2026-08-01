@@ -37,7 +37,7 @@ async def transcribe_audio(file_bytes: bytes, filename: str, api_key: str) -> st
         raise RuntimeError("Empty audio")
 
     mime = _mime_for(filename)
-    async with httpx.AsyncClient(timeout=90) as client:
+    async with httpx.AsyncClient(timeout=300) as client:
         resp = await client.post(
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {api_key}"},
@@ -45,7 +45,6 @@ async def transcribe_audio(file_bytes: bytes, filename: str, api_key: str) -> st
             data={
                 "model": "whisper-large-v3-turbo",
                 "response_format": "text",
-                "language": "hi",  # Hindi + Hinglish friendly; Whisper still auto-detects mix
             },
         )
         if resp.status_code >= 400:
