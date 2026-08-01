@@ -10,9 +10,11 @@ from bot import config
 from bot.domain.intent import Intent, parse_intent
 from bot.domain.mood import MOODS, MOOD_MAP
 from bot.domain.learning import profile_to_prompt_text, should_extract, extract_and_merge, empty_profile
+from bot.domain.orchestrator import build_context_packet, maybe_update_session_summary, media_followup_lines
 from bot.agent.chat_agent import build_chat_agent
 from bot.gateway.formatters import send_long_text, send_local_file
 from bot.infra.transcribe import transcribe_audio, extract_audio_from_video
+from bot.infra.media_describe import describe_media_path, is_image, is_video
 
 logger = logging.getLogger(__name__)
 
@@ -161,17 +163,56 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(str(e))
 
 
+async def _describe_and_remember(context, uid: int, local_name: str) -> str:
+    """Vision describe + save media memory. Returns description or empty."""
+    if not config.MEDIA_DESCRIBE_ON_DOWNLOAD:
+        return ""
+    memory = context.application.bot_data["memory"]
+    sandbox = context.application.bot_data["sandbox"]
+    path = sandbox.path_for(local_name)
+    if not path.exists():
+        return ""
+    if not (is_image(local_name) or is_video(local_name)):
+        return ""
+    try:
+        type_, desc = await describe_media_path(path)
+        memory.add_media(uid, file_key=local_name, name=local_name, type_=type_, description=desc)
+        return desc
+    except Exception:
+        logger.exception("media describe failed")
+        return ""
+
+
+async def _send_media_with_followup(update, context, local_name: str, uid: int):
+    sandbox = context.application.bot_data["sandbox"]
+    memory = context.application.bot_data["memory"]
+    path = sandbox.path_for(local_name)
+    # describe BEFORE send_local_file deletes the file
+    desc = await _describe_and_remember(context, uid, local_name)
+    await send_local_file(update, path)
+    if config.MEDIA_FOLLOWUP and desc:
+        mood = memory.get_mood(uid)
+        follow = media_followup_lines(desc, mood)
+        await send_long_text(update, follow)
+        # inject into history so chat knows she "sent" it
+        from langchain_core.messages import HumanMessage, AIMessage
+        h = memory.get_history(uid)
+        h.append(AIMessage(content=f"[maine yeh media bheji: {local_name}]\n{desc}\n\n{follow}"))
+        memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
+
+
 async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, serial: int, subfolder: str = "root"):
     drive = context.application.bot_data["drive"]
     sandbox = context.application.bot_data["sandbox"]
-    await update.message.reply_text(f"⬇️ Download #{serial}…")
+    uid = update.effective_user.id
+    await update.message.reply_text(f"⬇️ ruki… #{serial} bhejti hoon")
     status, msg = drive.download_by_serial(
-        update.effective_user.id, serial, sandbox.root, subfolder=subfolder
+        uid, serial, sandbox.root, subfolder=subfolder
     )
     if status != "ok":
         await update.message.reply_text(msg)
         return
-    await send_local_file(update, sandbox.path_for(msg))
+    await _send_media_with_followup(update, context, msg, uid)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -197,12 +238,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if parsed.intent == Intent.DRIVE_RANDOM:
         sandbox = context.application.bot_data["sandbox"]
-        await update.message.reply_text("🎲 Random file nikaal rahi hoon…")
+        await update.message.reply_text("🎲 ek random choose karti hoon…")
         status, msg = drive.download_random(uid, parsed.subfolder or "root", sandbox.root)
         if status != "ok":
             await update.message.reply_text(msg)
             return
-        await send_local_file(update, sandbox.path_for(msg))
+        await _send_media_with_followup(update, context, msg, uid)
         return
 
     if parsed.intent == Intent.DRIVE_LIST:
@@ -213,11 +254,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_long_text(update, drive.search(parsed.search_query or text))
         return
 
-    # CHAT only — inject learned profile into system prompt
+    # CHAT — rich context packet (mood, profile, media, session, emotion)
     history = memory.get_history(uid)
-    mood = memory.get_mood(uid)
-    profile = memory.get_profile(uid)
-    chain = build_chat_agent(llm, tools, current_mood=mood, user_profile=profile)
+    ctx = build_context_packet(memory, uid, user_text=text)
+    chain = build_chat_agent(
+        llm,
+        tools,
+        current_mood=ctx["mood"],
+        user_profile=ctx["profile"],
+        session_summary=ctx["session_summary_text"],
+        last_media=ctx["last_media_text"],
+        active_fantasy=ctx["fantasy_text"],
+        emotion=ctx["emotion"],
+    )
 
     try:
         reply = await chain.ainvoke({"input": text, "chat_history": history})
@@ -228,14 +277,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
         await send_long_text(update, reply)
 
-        # Background-ish learning: explicit remember OR rich personal lines
         if should_extract(text):
             try:
-                updated = await extract_and_merge(llm, profile or empty_profile(), text, reply)
+                updated = await extract_and_merge(llm, ctx["profile"] or empty_profile(), text, reply)
                 memory.set_profile(uid, updated)
+                # ongoing fantasy field
+                if updated.get("ongoing_fantasy"):
+                    memory.set_fantasy(uid, updated["ongoing_fantasy"])
                 logger.info("profile updated for user %s", uid)
             except Exception:
                 logger.exception("learning update failed")
+
+        try:
+            await maybe_update_session_summary(llm, memory, uid, text, reply)
+        except Exception:
+            logger.exception("session summary side-effect failed")
     except Exception as e:
         logger.exception("chat failed")
         await update.message.reply_text(
