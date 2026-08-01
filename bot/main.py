@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import threading
+from pathlib import Path
 
 from flask import Flask
 from telegram.ext import (
@@ -39,7 +40,7 @@ web_app = Flask(__name__)
 
 @web_app.route("/")
 def home():
-    return "Telegram Bot v1 running 🔥"
+    return "Telegram Bot v2 running 🔥"
 
 
 def run_web():
@@ -47,14 +48,21 @@ def run_web():
 
 
 async def run_bot():
+    Path(config.SANDBOX_PATH).mkdir(parents=True, exist_ok=True)
+    Path(config.MEMORY_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+
     sandbox = SandboxStorage(config.SANDBOX_PATH)
     memory = MemoryStore(config.MEMORY_DB_PATH)
-    serial_store = SerialMapStore(ttl_seconds=config.SERIAL_MAP_TTL_SECONDS)
+    serial_db = str(Path(config.MEMORY_DB_PATH).with_name("serial_map.db"))
+    serial_store = SerialMapStore(
+        ttl_seconds=config.SERIAL_MAP_TTL_SECONDS,
+        db_path=serial_db,
+    )
     drive = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
     llm = ChatGroq(
         model=config.GROQ_MODEL,
         groq_api_key=config.GROQ_API_KEY,
-        temperature=1.0,
+        temperature=config.TEMPERATURE,
     )
     tools = build_tools()
 
@@ -96,7 +104,12 @@ async def run_bot():
     app.add_handler(MessageHandler(filters.VIDEO, handle_video))
     app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
 
-    logger.info("Bot v1 started")
+    logger.info(
+        "Bot v2 started | temp=%s | vision=%s | describe=%s",
+        config.TEMPERATURE,
+        config.GROQ_VISION_MODEL,
+        config.MEDIA_DESCRIBE_ON_DOWNLOAD,
+    )
     await app.initialize()
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
