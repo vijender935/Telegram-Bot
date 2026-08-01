@@ -3,21 +3,26 @@ import logging
 import threading
 
 from flask import Flask
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+)
 from langchain_groq import ChatGroq
 
 from bot import config
-from bot.services.drive import DriveService
-from bot.services.sandbox import SandboxStorage
-from bot.tools.agent_tools import build_tools
-from bot.agent.personality import build_agent
-from bot.services.memory_store import MemoryStore
-from bot.handlers.text import handle_text, cmd_start, cmd_clear
-from bot.handlers.media import handle_document, handle_photo, handle_voice
-from bot.handlers.commands import (
+from bot.infra.sandbox import SandboxStorage
+from bot.infra.memory import MemoryStore
+from bot.infra.serial_map import SerialMapStore
+from bot.infra.drive_client import DriveClient
+from bot.agent.tools import build_tools
+from bot.gateway.handlers import (
+    cmd_start, cmd_clear, cmd_mood, mood_callback,
     cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
+    handle_text, handle_document, handle_photo, handle_voice,
 )
-from bot.handlers.mood import cmd_mood, mood_callback
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -33,7 +38,7 @@ web_app = Flask(__name__)
 
 @web_app.route("/")
 def home():
-    return "Telegram Bot running 🔥"
+    return "Telegram Bot v1 running 🔥"
 
 
 def run_web():
@@ -42,15 +47,15 @@ def run_web():
 
 async def run_bot():
     sandbox = SandboxStorage(config.SANDBOX_PATH)
-    memory_store = MemoryStore(config.MEMORY_DB_PATH)
-    drive = DriveService(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON)
+    memory = MemoryStore(config.MEMORY_DB_PATH)
+    serial_store = SerialMapStore(ttl_seconds=config.SERIAL_MAP_TTL_SECONDS)
+    drive = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
     llm = ChatGroq(
         model=config.GROQ_MODEL,
         groq_api_key=config.GROQ_API_KEY,
         temperature=0.7,
     )
-    tools = build_tools(drive, sandbox)
-    agent = build_agent(llm, tools)
+    tools = build_tools()
 
     app = (
         Application.builder()
@@ -64,8 +69,7 @@ async def run_bot():
 
     app.bot_data["drive"] = drive
     app.bot_data["sandbox"] = sandbox
-    app.bot_data["memory"] = memory_store
-    app.bot_data["agent"] = agent
+    app.bot_data["memory"] = memory
     app.bot_data["llm"] = llm
     app.bot_data["tools"] = tools
     app.bot_data["groq_api_key"] = config.GROQ_API_KEY
@@ -85,7 +89,7 @@ async def run_bot():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
-    logger.info("Bot started")
+    logger.info("Bot v1 started")
     await app.initialize()
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)

@@ -1,6 +1,20 @@
-# Telegram Sexy Bot + Google Drive
+# Telegram Bot v1 — Layered Architecture
 
-Professional OOP structure.
+## Design
+
+```
+Telegram → Gateway (handlers) → Intent Router → Domain
+                                      ↓
+                              Chat Agent (LLM only)
+                                      ↓
+                    Infra: Drive / Memory / Sandbox / Whisper
+```
+
+**Key rules**
+- Drive commands never go through LLM tool-calling
+- Serial download maps are **per-user** with 30min TTL
+- Mood + chat history in SQLite
+- Optional `ALLOWED_USER_IDS` allowlist
 
 ## Structure
 
@@ -8,25 +22,25 @@ Professional OOP structure.
 bot/
 ├── main.py
 ├── config.py
-├── services/     # DriveService, SandboxStorage
-├── tools/        # LangChain tools
-├── handlers/     # text, media, commands
-└── agent/        # personality + agent
+├── gateway/       # Telegram I/O only
+├── domain/        # intent, mood
+├── agent/         # prompts + chat agent
+└── infra/         # drive, memory, sandbox, transcribe
 ```
 
 ## Render
 
-**Start Command:**
-```
-python -m bot.main
-```
+**Start Command:** `python -m bot.main`
 
-## Env variables
+## Env
 
-- `TELEGRAM_BOT_TOKEN`
-- `GROQ_API_KEY`
-- `GOOGLE_DRIVE_FOLDER_ID`  (Map folder ID)
-- `GOOGLE_SERVICE_ACCOUNT_JSON`  (full JSON string)
+```
+TELEGRAM_BOT_TOKEN=
+GROQ_API_KEY=
+GOOGLE_DRIVE_FOLDER_ID=
+GOOGLE_SERVICE_ACCOUNT_JSON=
+ALLOWED_USER_IDS=          # optional, comma-separated
+```
 
 ## Usage
 
@@ -36,5 +50,5 @@ python -m bot.main
 /download 2
 2 download karo
 Map folder list karo
-Picture folder dikhao
+/mood
 ```
