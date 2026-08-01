@@ -156,10 +156,58 @@ class DriveClient:
                 while not done:
                     _, done = dl.next_chunk()
 
-    def download_by_serial(self, user_id: int, serial: int, dest_dir: Path) -> tuple[str, str]:
+
+    def _resolve_folder(self, subfolder_name: str) -> tuple[str, str]:
+        """Return (folder_id, label)."""
+        name = (subfolder_name or "root").strip()
+        low = name.lower()
+        if low in ("", "root", "main", "map"):
+            return self.folder_id, "Map"
+        found = self.find_folder_id(name)
+        if not found:
+            raise FileNotFoundError(name)
+        return found, name
+
+    def _list_entries(self, target_id: str) -> dict[int, FileEntry]:
+        res = self._service.files().list(
+            q=f"'{target_id}' in parents and trashed=false",
+            pageSize=100,
+            fields="files(id,name,mimeType,size)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+            orderBy="folder,name",
+        ).execute()
+        files = res.get("files", [])
+        entries: dict[int, FileEntry] = {}
+        for i, f in enumerate(files, start=1):
+            entries[i] = FileEntry(
+                file_id=f["id"], name=f["name"], mime=f.get("mimeType", "")
+            )
+        return entries
+
+    def download_by_serial(
+        self, user_id: int, serial: int, dest_dir: Path, subfolder: str = "root"
+    ) -> tuple[str, str]:
+        """One-shot: optional subfolder list → serial download. List cache update."""
         entry = self.serial_store.get(user_id, serial)
+
+        # Agar list miss / expire aur subfolder diya → pehle list banao silently
+        if not entry and subfolder:
+            try:
+                target_id, _ = self._resolve_folder(subfolder)
+            except FileNotFoundError:
+                return "error", f"Folder nahi mili: {subfolder}"
+            entries = self._list_entries(target_id)
+            if not entries:
+                return "error", f"'{subfolder}' khali hai."
+            self.serial_store.set_list(user_id, entries)
+            entry = entries.get(int(serial))
+
         if not entry:
-            return "error", "Serial invalid ya list expire. Pehle /drive chalao."
+            entry = self.serial_store.get(user_id, serial)
+        if not entry:
+            return "error", "Serial invalid ya list expire. Pehle list karo YA: insta se 2 download karo"
+
         dest = dest_dir / Path(entry.name).name
         try:
             self.download_to_path(entry.file_id, dest, entry.mime)
@@ -167,6 +215,33 @@ class DriveClient:
         except Exception as e:
             logger.exception("download failed")
             return "error", f"Download fail: {type(e).__name__}: {e}"
+
+    def download_random(self, user_id: int, subfolder: str, dest_dir: Path) -> tuple[str, str]:
+        import random
+        try:
+            target_id, label = self._resolve_folder(subfolder)
+        except FileNotFoundError:
+            return "error", f"Folder nahi mili: {subfolder}"
+        entries = self._list_entries(target_id)
+        # skip folders
+        files = {
+            k: v for k, v in entries.items()
+            if v.mime != "application/vnd.google-apps.folder"
+        }
+        if not files:
+            return "error", f"'{label}' mein downloadable file nahi."
+        self.serial_store.set_list(user_id, entries)
+        serial = random.choice(list(files.keys()))
+        entry = files[serial]
+        dest = dest_dir / Path(entry.name).name
+        try:
+            self.download_to_path(entry.file_id, dest, entry.mime)
+            return "ok", dest.name
+        except Exception as e:
+            logger.exception("random download failed")
+            return "error", f"Fail: {e}"
+
+
 
     def search(self, query: str) -> str:
         if not query.strip():

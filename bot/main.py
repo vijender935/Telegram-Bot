@@ -19,9 +19,10 @@ from bot.infra.serial_map import SerialMapStore
 from bot.infra.drive_client import DriveClient
 from bot.agent.tools import build_tools
 from bot.gateway.handlers import (
-    cmd_start, cmd_clear, cmd_mood, mood_callback,
+    cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_mood, mood_callback,
     cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
     handle_text, handle_document, handle_photo, handle_voice,
+    handle_audio, handle_video, handle_video_note, file_action_callback,
 )
 
 logging.basicConfig(
@@ -76,8 +77,11 @@ async def run_bot():
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
+    app.add_handler(CommandHandler("profile", cmd_profile))
+    app.add_handler(CommandHandler("forgetprofile", cmd_forgetprofile))
     app.add_handler(CommandHandler("mood", cmd_mood))
     app.add_handler(CallbackQueryHandler(mood_callback, pattern="^mood_"))
+    app.add_handler(CallbackQueryHandler(file_action_callback, pattern="^fileact_"))
     app.add_handler(CommandHandler("drive", cmd_drive))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("download", cmd_download))
@@ -88,6 +92,9 @@ async def run_bot():
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.AUDIO, handle_audio))
+    app.add_handler(MessageHandler(filters.VIDEO, handle_video))
+    app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
 
     logger.info("Bot v1 started")
     await app.initialize()

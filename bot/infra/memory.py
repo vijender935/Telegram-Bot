@@ -5,7 +5,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 
 class MemoryStore:
-    """Per-user chat history + mood (SQLite)."""
+    """Per-user chat history + mood + learned profile (SQLite)."""
 
     def __init__(self, db_path: str = "/tmp/bot_memory.db"):
         self.db_path = db_path
@@ -27,6 +27,12 @@ class MemoryStore:
                 CREATE TABLE IF NOT EXISTS moods (
                     user_id INTEGER PRIMARY KEY,
                     mood TEXT NOT NULL DEFAULT 'Horny / Flirty'
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS profiles (
+                    user_id INTEGER PRIMARY KEY,
+                    profile TEXT NOT NULL DEFAULT '{}'
                 )
             """)
 
@@ -59,7 +65,7 @@ class MemoryStore:
                 conn.execute("""
                     INSERT INTO memories (user_id, history) VALUES (?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET history = excluded.history
-                """, (user_id, json.dumps(raw)))
+                """, (user_id, json.dumps(raw, ensure_ascii=False)))
 
     def clear_history(self, user_id: int):
         with self._lock:
@@ -81,3 +87,29 @@ class MemoryStore:
                     INSERT INTO moods (user_id, mood) VALUES (?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET mood = excluded.mood
                 """, (user_id, mood))
+
+    def get_profile(self, user_id: int) -> dict:
+        with self._lock:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT profile FROM profiles WHERE user_id = ?", (user_id,)
+                ).fetchone()
+        if not row or not row[0]:
+            return {}
+        try:
+            return json.loads(row[0])
+        except Exception:
+            return {}
+
+    def set_profile(self, user_id: int, profile: dict):
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("""
+                    INSERT INTO profiles (user_id, profile) VALUES (?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET profile = excluded.profile
+                """, (user_id, json.dumps(profile or {}, ensure_ascii=False)))
+
+    def clear_profile(self, user_id: int):
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM profiles WHERE user_id = ?", (user_id,))

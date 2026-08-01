@@ -1,54 +1,40 @@
-# Telegram Bot v1 — Layered Architecture
+# Telegram Bot v1 — Layered + Learning
 
 ## Design
-
 ```
-Telegram → Gateway (handlers) → Intent Router → Domain
-                                      ↓
-                              Chat Agent (LLM only)
-                                      ↓
-                    Infra: Drive / Memory / Sandbox / Whisper
+Telegram → Gateway → Intent Router → Domain
+                         ↓
+                 Chat Agent (LLM + learned profile)
+                         ↓
+           Infra: Drive / Memory / Sandbox / Whisper
 ```
 
-**Key rules**
-- Drive commands never go through LLM tool-calling
-- Serial download maps are **per-user** with 30min TTL
-- Mood + chat history in SQLite
-- Optional `ALLOWED_USER_IDS` allowlist
-
-## Structure
-
-```
-bot/
-├── main.py
-├── config.py
-├── gateway/       # Telegram I/O only
-├── domain/        # intent, mood
-├── agent/         # prompts + chat agent
-└── infra/         # drive, memory, sandbox, transcribe
-```
+## Features
+- Drive one-shot: `insta se 2 download karo` (list pehle zaroori nahi)
+- Bare serial: `2` after a list
+- Random file: `insta se koi bhi random`
+- Voice / audio / video transcript
+- File actions: Transcribe / Save / Upload Drive
+- Learned profile memory (`/profile`, `/forgetprofile`)
+- Mood system (`/mood`)
 
 ## Render
-
 **Start Command:** `python -m bot.main`
 
-## Env
+**Build (video transcript):**  
+`apt-get update && apt-get install -y ffmpeg && pip install -r requirements.txt`
 
+## Env
 ```
 TELEGRAM_BOT_TOKEN=
 GROQ_API_KEY=
 GOOGLE_DRIVE_FOLDER_ID=
 GOOGLE_SERVICE_ACCOUNT_JSON=
-ALLOWED_USER_IDS=          # optional, comma-separated
+ALLOWED_USER_IDS=
 ```
 
-## Usage
-
+## Commands
 ```
-/drive
-/list Picture
-/download 2
-2 download karo
-Map folder list karo
-/mood
+/drive  /list Insta  /download 2  /mood
+/profile  /forgetprofile  /clear
 ```
