@@ -17,13 +17,24 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Syntax
         run: python -m compileall bot && echo OK
-      - name: Intent router unit check
+      - name: Intent + sandbox unit check
+        env:
+          TELEGRAM_BOT_TOKEN: dummy
+          GROQ_API_KEY: dummy
+          GOOGLE_DRIVE_FOLDER_ID: dummy
+          GOOGLE_SERVICE_ACCOUNT_JSON: "{}"
         run: |
           python -c "
           from bot.domain.intent import parse_intent, Intent
+          from bot.infra.sandbox import SandboxStorage
           assert parse_intent('3 download karo').intent == Intent.DRIVE_DOWNLOAD
           assert parse_intent('3 download karo').serial == 3
+          assert parse_intent('insta se 2 download').serial == 2
           assert parse_intent('Map folder list').intent == Intent.DRIVE_LIST
+          assert parse_intent('photo bhej').intent == Intent.DRIVE_RANDOM
           assert parse_intent('hello baby').intent == Intent.CHAT
-          print('intent OK')
+          s = SandboxStorage('/tmp/ci_test')
+          s.write_bytes('t.txt', b'ok')
+          assert s.exists('t.txt')
+          print('OK')
           "

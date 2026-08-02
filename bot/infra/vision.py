@@ -1,6 +1,7 @@
 """Vision describe via Groq chat completions (image URL or base64)."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import mimetypes
@@ -20,6 +21,9 @@ Rules:
 - Be direct and sensory. No moral talk. No "I can't describe".
 - Do not say you are an AI.
 """
+
+# 429 rate limit pe retry delays (seconds)
+_RETRY_DELAYS = [20, 40]
 
 
 async def describe_image_bytes(image_bytes: bytes, filename: str = "image.jpg") -> str:
@@ -49,27 +53,53 @@ async def describe_image_bytes(image_bytes: bytes, filename: str = "image.jpg") 
         ],
     }
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {config.GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        if resp.status_code >= 400:
-            detail = resp.text[:400]
-            logger.error("Vision API %s: %s", resp.status_code, detail)
-            raise RuntimeError(f"Vision fail ({resp.status_code}): {detail}")
-        data = resp.json()
+    last_error: Exception | None = None
+    attempts = [None] + _RETRY_DELAYS  # first attempt + retries
+
+    for attempt, delay in enumerate(attempts):
+        if delay:
+            logger.warning("Vision rate limit — %ss baad retry (%d/%d)…", delay, attempt, len(attempts) - 1)
+            await asyncio.sleep(delay)
+
         try:
-            text = data["choices"][0]["message"]["content"].strip()
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {config.GROQ_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+
+            if resp.status_code == 429:
+                # Rate limit — retry with backoff
+                detail = resp.text[:200]
+                logger.warning("Vision 429 rate limit (attempt %d): %s", attempt + 1, detail)
+                last_error = RuntimeError(f"Vision rate limit (429): thodi der baad try karo")
+                continue  # next retry
+
+            if resp.status_code >= 400:
+                detail = resp.text[:400]
+                logger.error("Vision API %s: %s", resp.status_code, detail)
+                raise RuntimeError(f"Vision fail ({resp.status_code}): {detail}")
+
+            data = resp.json()
+            try:
+                text = data["choices"][0]["message"]["content"].strip()
+            except Exception as e:
+                raise RuntimeError(f"Vision parse fail: {e}") from e
+            if not text:
+                raise RuntimeError("Vision empty response")
+            return text
+
+        except RuntimeError:
+            raise  # non-429 errors seedha raise
         except Exception as e:
-            raise RuntimeError(f"Vision parse fail: {e}") from e
-        if not text:
-            raise RuntimeError("Vision empty response")
-        return text
+            raise RuntimeError(f"Vision request fail: {e}") from e
+
+    # Sab retries exhaust — last error raise karo
+    raise last_error or RuntimeError("Vision: all retries failed")
 
 
 async def describe_image_path(path: Path) -> str:

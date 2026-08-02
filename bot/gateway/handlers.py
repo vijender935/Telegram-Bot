@@ -25,6 +25,11 @@ def _allowed(uid: int) -> bool:
     return uid in config.ALLOWED_USER_IDS
 
 
+def _get_drive(context):
+    """Drive client return karo. None agar credentials missing hain."""
+    return context.application.bot_data.get("drive")
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         return
@@ -97,7 +102,10 @@ async def mood_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_drive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         return
-    drive = context.application.bot_data["drive"]
+    drive = _get_drive(context)
+    if not drive:
+        await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+        return
     text = drive.list_files(update.effective_user.id, "root")
     await send_long_text(update, text)
 
@@ -105,7 +113,10 @@ async def cmd_drive(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         return
-    drive = context.application.bot_data["drive"]
+    drive = _get_drive(context)
+    if not drive:
+        await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+        return
     sub = " ".join(context.args) if context.args else "root"
     text = drive.list_files(update.effective_user.id, sub)
     await send_long_text(update, text)
@@ -126,7 +137,10 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Usage: /search <query>")
         return
-    drive = context.application.bot_data["drive"]
+    drive = _get_drive(context)
+    if not drive:
+        await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+        return
     await send_long_text(update, drive.search(" ".join(context.args)))
 
 
@@ -134,7 +148,10 @@ async def cmd_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         return
     sandbox = context.application.bot_data["sandbox"]
-    drive = context.application.bot_data["drive"]
+    drive = _get_drive(context)
+    if not drive:
+        await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+        return
     if not context.args:
         await update.message.reply_text("Usage: /upload <local_filename>")
         return
@@ -202,7 +219,10 @@ async def _send_media_with_followup(update, context, local_name: str, uid: int):
 
 
 async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, serial: int, subfolder: str = "root"):
-    drive = context.application.bot_data["drive"]
+    drive = _get_drive(context)
+    if not drive:
+        await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+        return
     sandbox = context.application.bot_data["sandbox"]
     uid = update.effective_user.id
     await update.message.reply_text(f"⬇️ ruki… #{serial} bhejti hoon")
@@ -225,7 +245,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Kuch toh bol yaar 😏")
         return
 
-    drive = context.application.bot_data["drive"]
+    drive = _get_drive(context)
     memory = context.application.bot_data["memory"]
     llm = context.application.bot_data["llm"]
     tools = context.application.bot_data["tools"]
@@ -237,6 +257,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if parsed.intent == Intent.DRIVE_RANDOM:
+        if not drive:
+            await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+            return
         sandbox = context.application.bot_data["sandbox"]
         await update.message.reply_text("🎲 ek random choose karti hoon…")
         status, msg = drive.download_random(uid, parsed.subfolder or "root", sandbox.root)
@@ -247,10 +270,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if parsed.intent == Intent.DRIVE_LIST:
+        if not drive:
+            await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+            return
         await send_long_text(update, drive.list_files(uid, parsed.subfolder))
         return
 
     if parsed.intent == Intent.DRIVE_SEARCH:
+        if not drive:
+            await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+            return
         await send_long_text(update, drive.search(parsed.search_query or text))
         return
 
@@ -316,7 +345,7 @@ async def _transcribe_and_reply(update, context, file_bytes: bytes, filename: st
         preview = transcript if len(transcript) <= 1500 else transcript[:1500] + "…"
         h = memory.get_history(uid)
         h.append(HumanMessage(content=f"[{label}]\nTranscript: {preview}"))
-        memory.save_history(uid, h)
+        memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
         try:
             await status.edit_text("📝 Transcript ready:")
         except Exception:
@@ -371,10 +400,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.exception("video transcript failed")
                 await status.edit_text(f"Video transcript fail:\n{str(e)[:250]}")
         else:
-            await tg_file.download_to_drive(str(sandbox.path_for(name)))
+            # FIX: data already in buf — write directly, no double download
+            sandbox.write_bytes(name, data)
             h = memory.get_history(uid)
             h.append(HumanMessage(content=f"[document: {name}]"))
-            memory.save_history(uid, h)
+            memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
             await _ask_file_method(update, context, name, "document")
     except Exception:
         logger.exception("document failed")
@@ -394,7 +424,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await f.download_to_drive(str(sandbox.path_for(name)))
         h = memory.get_history(uid)
         h.append(HumanMessage(content="[photo]"))
-        memory.save_history(uid, h)
+        memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
         await _ask_file_method(update, context, name, "photo")
     except Exception:
         logger.exception("photo failed")
@@ -513,7 +543,7 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     name = pending["name"]
     sandbox = context.application.bot_data["sandbox"]
-    drive = context.application.bot_data["drive"]
+    drive = _get_drive(context)
     path = sandbox.path_for(name)
     action = query.data
 
@@ -529,6 +559,9 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if action == "fileact_upload":
+        if not drive:
+            await query.edit_message_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+            return
         if not path.exists():
             await query.edit_message_text("File missing.")
             return
@@ -558,8 +591,9 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             transcript = await transcribe_audio(data, fname, groq_key)
             memory = context.application.bot_data["memory"]
             h = memory.get_history(query.from_user.id)
-            h.append(HumanMessage(content=f"[file:{name}]\nTranscript: {transcript}"))
-            memory.save_history(query.from_user.id, h)
+            preview = transcript if len(transcript) <= 1500 else transcript[:1500] + "…"
+            h.append(HumanMessage(content=f"[file:{name}]\nTranscript: {preview}"))
+            memory.save_history(query.from_user.id, h, config.MAX_HISTORY_MESSAGES)
             context.user_data.pop("pending_file", None)
             await query.edit_message_text("📝 Transcript ready:")
             chat_id = query.message.chat_id

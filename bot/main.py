@@ -53,12 +53,16 @@ async def run_bot():
 
     sandbox = SandboxStorage(config.SANDBOX_PATH)
     memory = MemoryStore(config.MEMORY_DB_PATH)
-    serial_db = str(Path(config.MEMORY_DB_PATH).with_name("serial_map.db"))
     serial_store = SerialMapStore(
         ttl_seconds=config.SERIAL_MAP_TTL_SECONDS,
-        db_path=serial_db,
     )
-    drive = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
+    # FIX: Drive credentials missing/wrong hone pe bot crash na kare
+    try:
+        drive = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
+        logger.info("DriveClient initialized OK")
+    except Exception as e:
+        logger.warning("DriveClient init failed — Drive features disabled: %s", e)
+        drive = None
     llm = ChatGroq(
         model=config.GROQ_MODEL,
         groq_api_key=config.GROQ_API_KEY,
