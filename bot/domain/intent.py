@@ -25,6 +25,10 @@ DRIVE_KEYWORDS = (
     "insta", "picture", "pdf", "audio", "other", "tosspage",
     "download", "random",
 )
+SEND_MEDIA_RE = (
+    r"\b(photo|photos|pic|pics|image|images|selfie|nudes?|video|videos|clip)s?\b"
+)
+
 SUBFOLDERS = ("insta", "picture", "pdf", "audio", "other", "tosspage", "map")
 
 
@@ -49,6 +53,20 @@ def parse_intent(text: str) -> ParsedIntent:
     if "random" in low or re.search(r"\bkoi\s*(bhi|bi)\b", low):
         if any(k in low for k in DRIVE_KEYWORDS) or any(f in low for f in SUBFOLDERS):
             return ParsedIntent(Intent.DRIVE_RANDOM, subfolder=_detect_subfolder(low))
+
+    # Natural "send me a photo/video" style requests → random media
+    if re.search(
+        r"\b(photo|photos|pic|pics|image|selfie|nudes?|video|clip)s?\b",
+        low,
+    ) and re.search(
+        r"\b(bhej|bhejo|bhejdo|bhej\s*do|send|dikha|dikhao|show|share|do)\b",
+        low,
+    ):
+        return ParsedIntent(Intent.DRIVE_RANDOM, subfolder=_detect_subfolder(low))
+
+    # short forms: "photo bhej", "pic bhej do", "nude bhejo"
+    if re.search(r"\b(photo|pic|pics|selfie|nude|nudes|video)\s*(bhej|bhejo|bhejdo|send)\b", low):
+        return ParsedIntent(Intent.DRIVE_RANDOM, subfolder=_detect_subfolder(low))
 
     # Download with optional folder:
     # "insta folder se 2 no file download"
