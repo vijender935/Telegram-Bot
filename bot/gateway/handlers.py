@@ -261,8 +261,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
             return
         sandbox = context.application.bot_data["sandbox"]
-        await update.message.reply_text("🎲 ek random choose karti hoon…")
-        status, msg = drive.download_random(uid, parsed.subfolder or "root", sandbox.root)
+        kind = getattr(parsed, "media_kind", "any") or "any"
+        label = {"image": "photo", "video": "video"}.get(kind, "file")
+        await update.message.reply_text(f"🎲 ek {label} choose karti hoon…")
+        status, msg = drive.download_random(
+            uid, parsed.subfolder or "root", sandbox.root, media_kind=kind
+        )
         if status != "ok":
             await update.message.reply_text(msg)
             return

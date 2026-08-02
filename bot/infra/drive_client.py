@@ -216,20 +216,35 @@ class DriveClient:
             logger.exception("download failed")
             return "error", f"Download fail: {type(e).__name__}: {e}"
 
-    def download_random(self, user_id: int, subfolder: str, dest_dir: Path) -> tuple[str, str]:
+
+    def download_random(
+        self, user_id: int, subfolder: str, dest_dir: Path, media_kind: str = "any"
+    ) -> tuple[str, str]:
+        """Random file. media_kind: any | image | video"""
         import random
         try:
             target_id, label = self._resolve_folder(subfolder)
         except FileNotFoundError:
             return "error", f"Folder nahi mili: {subfolder}"
         entries = self._list_entries(target_id)
-        # skip folders
-        files = {
-            k: v for k, v in entries.items()
-            if v.mime != "application/vnd.google-apps.folder"
-        }
+        kind = (media_kind or "any").lower()
+        img_ext = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic")
+        vid_ext = (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v")
+
+        def match(entry) -> bool:
+            if entry.mime == "application/vnd.google-apps.folder":
+                return False
+            ext = Path(entry.name).suffix.lower()
+            if kind == "image":
+                return entry.mime.startswith("image/") or ext in img_ext
+            if kind == "video":
+                return entry.mime.startswith("video/") or ext in vid_ext
+            return True
+
+        files = {k: v for k, v in entries.items() if match(v)}
         if not files:
-            return "error", f"'{label}' mein downloadable file nahi."
+            want = {"image": "photo/image", "video": "video"}.get(kind, "downloadable")
+            return "error", f"'{label}' mein koi {want} file nahi mili."
         self.serial_store.set_list(user_id, entries)
         serial = random.choice(list(files.keys()))
         entry = files[serial]
