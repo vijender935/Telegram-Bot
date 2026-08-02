@@ -14,7 +14,7 @@ MEMORY_DB_PATH = os.getenv("MEMORY_DB_PATH", "/var/data/bot_memory.db" if os.pat
 
 PORT = int(os.environ.get("PORT", 8080))
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.95"))
 
 _allow = os.getenv("ALLOWED_USER_IDS", "").strip()
