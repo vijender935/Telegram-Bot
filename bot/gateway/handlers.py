@@ -615,10 +615,8 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 from bot.infra.image_enhance import enhance_image, EnhanceMode
 
 ENHANCE_ACTIONS = [
-    ("🎨 AI Regenerate",    "enhance_regen"),
-    ("📐 Free Upscale", "enhance_upscale"),
-    ("🔥 Full (HF+local)",    "enhance_full"),
-    ("❌ Skip",             "enhance_skip"),
+    ("🎨 AI Enhance (FREE)", "enhance_regen"),
+    ("❌ Skip", "enhance_skip"),
 ]
 
 
@@ -628,9 +626,8 @@ async def _ask_enhance_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     await update.message.reply_text(
         f"📸 Photo mili: `{local_name}`\n\n"
         "Kya karna hai?\n\n"
-        "🎨 *AI Regenerate* — Hugging Face FREE\n"
-        "📐 *Free Upscale* — local sharp (no paid API)\n"
-        "🔥 *Full* — HF regen → local upscale (all FREE)",
+        "🎨 *AI Enhance* — Hugging Face FREE only.\n"
+        "Paid upscale hata diya.",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown",
     )

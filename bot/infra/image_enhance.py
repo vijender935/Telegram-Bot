@@ -136,6 +136,7 @@ async def enhance_image(
     scale: int = 2,
     strength: float = 0.55,
 ) -> tuple[bytes, str]:
+    mode = EnhanceMode.REGENERATE  # force free-only UI
     if mode == EnhanceMode.REGENERATE:
         kwargs = {}
         if prompt:
