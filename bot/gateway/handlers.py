@@ -429,7 +429,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         h = memory.get_history(uid)
         h.append(HumanMessage(content="[photo]"))
         memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
-        await _ask_file_method(update, context, name, "photo")
+        await _ask_enhance_mode(update, context, name)
     except Exception:
         logger.exception("photo failed")
         await update.message.reply_text("Photo fail.")
@@ -607,3 +607,121 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception as e:
             logger.exception("fileact transcribe")
             await query.edit_message_text(f"Fail: {str(e)[:200]}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IMAGE ENHANCEMENT HANDLERS
+# ─────────────────────────────────────────────────────────────────────────────
+from bot.infra.image_enhance import enhance_image, EnhanceMode
+
+ENHANCE_ACTIONS = [
+    ("🎨 AI Regenerate",    "enhance_regen"),
+    ("📐 Faithful Upscale", "enhance_upscale"),
+    ("🔥 Full Pipeline",    "enhance_full"),
+    ("❌ Skip",             "enhance_skip"),
+]
+
+
+async def _ask_enhance_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, local_name: str):
+    context.user_data["enhance_file"] = local_name
+    keyboard = [[InlineKeyboardButton(t, callback_data=d)] for t, d in ENHANCE_ACTIONS]
+    await update.message.reply_text(
+        f"📸 Photo mili: `{local_name}`\n\n"
+        "Kya karna hai?\n\n"
+        "🎨 *AI Regenerate* — face/details reconstruct + beautify\n"
+        "📐 *Faithful Upscale* — same face, 4x sharp (Real-ESRGAN)\n"
+        "🔥 *Full Pipeline* — AI regen → upscale (best quality)",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown",
+    )
+
+
+async def enhance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not _allowed(query.from_user.id):
+        return
+
+    action = query.data
+    if action == "enhance_skip":
+        context.user_data.pop("enhance_file", None)
+        await query.edit_message_text("Skip ✅")
+        return
+
+    local_name = context.user_data.get("enhance_file")
+    if not local_name:
+        await query.edit_message_text("Koi pending photo nahi.")
+        return
+
+    sandbox = context.application.bot_data["sandbox"]
+    path = sandbox.path_for(local_name)
+    if not path.exists():
+        await query.edit_message_text("File missing — dubara bhejo.")
+        context.user_data.pop("enhance_file", None)
+        return
+
+    mode_map = {
+        "enhance_regen":   EnhanceMode.REGENERATE,
+        "enhance_upscale": EnhanceMode.UPSCALE,
+        "enhance_full":    EnhanceMode.FULL,
+    }
+    mode = mode_map.get(action, EnhanceMode.FULL)
+
+    mode_labels = {
+        EnhanceMode.REGENERATE: "🎨 AI Regeneration",
+        EnhanceMode.UPSCALE:    "📐 Faithful Upscale",
+        EnhanceMode.FULL:       "🔥 Full Pipeline",
+    }
+    await query.edit_message_text(
+        f"{mode_labels[mode]} shuru ho raha hai… ⏳\n_(30–90 seconds lagenge)_",
+        parse_mode="Markdown",
+    )
+
+    try:
+        image_bytes = path.read_bytes()
+        enhanced_bytes, description = await enhance_image(
+            image_bytes, mode=mode, scale=4, strength=0.55,
+        )
+
+        uid = query.from_user.id
+        memory = context.application.bot_data["memory"]
+        output_name = f"enhanced_{local_name}"
+        output_path = sandbox.path_for(output_name)
+        output_path.write_bytes(enhanced_bytes)
+
+        memory.add_media(uid, file_key=output_name, name=output_name,
+                         type_="image", description=description)
+
+        await context.bot.send_photo(
+            chat_id=query.message.chat_id,
+            photo=enhanced_bytes,
+            caption=f"✅ {description}",
+        )
+
+        h = memory.get_history(uid)
+        h.append(AIMessage(content=f"[Enhanced image bheji: {mode.value}]\n{description}"))
+        memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
+
+        context.user_data.pop("enhance_file", None)
+        path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+    except Exception as e:
+        logger.exception("enhance failed")
+        try:
+            await query.edit_message_text(f"Enhancement fail 😤\n{str(e)[:250]}")
+        except Exception:
+            await context.bot.send_message(query.message.chat_id, f"Enhancement fail 😤\n{str(e)[:250]}")
+
+
+async def cmd_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/enhance — last photo ko enhance karo"""
+    if not _allowed(update.effective_user.id):
+        return
+    pending = context.user_data.get("enhance_file")
+    if not pending:
+        await update.message.reply_text(
+            "Pehle ek photo bhejo, phir /enhance use karo. 📸"
+        )
+        return
+    await _ask_enhance_mode(update, context, pending)

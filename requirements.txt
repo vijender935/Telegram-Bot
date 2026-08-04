@@ -22,5 +22,8 @@ google-auth-oauthlib>=1.2.0,<2.0.0
 # ── Transcription ──
 ffmpeg-python>=0.2.0
 
+# ── Image Enhancement ──
+huggingface_hub>=0.23.0
+
 # ── Database ──
 psycopg2-binary>=2.9.0

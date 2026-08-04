@@ -10,6 +10,10 @@ GOOGLE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
 GOOGLE_SA_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
+# ── Image Enhancement APIs ──
+HF_TOKEN            = os.getenv("HF_TOKEN", "")          # huggingface.co — FREE
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "") # replicate.com — pay per use
+
 # Prefer persistent paths on Render disk if available
 SANDBOX_PATH = os.getenv("SANDBOX_PATH", "/var/data/bot_files" if os.path.isdir("/var/data") else "/tmp/bot_files")
 MEMORY_DB_PATH = os.getenv("MEMORY_DB_PATH", "/var/data/bot_memory.db" if os.path.isdir("/var/data") else "/tmp/bot_memory.db")

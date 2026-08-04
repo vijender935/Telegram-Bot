@@ -20,6 +20,7 @@ from bot.infra.serial_map import SerialMapStore
 from bot.infra.drive_client import DriveClient
 from bot.agent.tools import build_tools
 from bot.gateway.handlers import (
+    enhance_callback, cmd_enhance,
     cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_mood, mood_callback,
     cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
     handle_text, handle_document, handle_photo, handle_voice,
@@ -94,6 +95,8 @@ async def run_bot():
     app.add_handler(CommandHandler("mood", cmd_mood))
     app.add_handler(CallbackQueryHandler(mood_callback, pattern="^mood_"))
     app.add_handler(CallbackQueryHandler(file_action_callback, pattern="^fileact_"))
+    app.add_handler(CallbackQueryHandler(enhance_callback, pattern="^enhance_"))
+    app.add_handler(CommandHandler("enhance", cmd_enhance))
     app.add_handler(CommandHandler("drive", cmd_drive))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("download", cmd_download))
