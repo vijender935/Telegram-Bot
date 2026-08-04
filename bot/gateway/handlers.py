@@ -616,8 +616,8 @@ from bot.infra.image_enhance import enhance_image, EnhanceMode
 
 ENHANCE_ACTIONS = [
     ("🎨 AI Regenerate",    "enhance_regen"),
-    ("📐 Faithful Upscale", "enhance_upscale"),
-    ("🔥 Full Pipeline",    "enhance_full"),
+    ("📐 Free Upscale", "enhance_upscale"),
+    ("🔥 Full (HF+local)",    "enhance_full"),
     ("❌ Skip",             "enhance_skip"),
 ]
 
@@ -628,9 +628,9 @@ async def _ask_enhance_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     await update.message.reply_text(
         f"📸 Photo mili: `{local_name}`\n\n"
         "Kya karna hai?\n\n"
-        "🎨 *AI Regenerate* — face/details reconstruct + beautify\n"
-        "📐 *Faithful Upscale* — same face, 4x sharp (Real-ESRGAN)\n"
-        "🔥 *Full Pipeline* — AI regen → upscale (best quality)",
+        "🎨 *AI Regenerate* — Hugging Face FREE\n"
+        "📐 *Free Upscale* — local sharp (no paid API)\n"
+        "🔥 *Full* — HF regen → local upscale (all FREE)",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown",
     )
@@ -669,8 +669,8 @@ async def enhance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     mode_labels = {
         EnhanceMode.REGENERATE: "🎨 AI Regeneration",
-        EnhanceMode.UPSCALE:    "📐 Faithful Upscale",
-        EnhanceMode.FULL:       "🔥 Full Pipeline",
+        EnhanceMode.UPSCALE:    "📐 Free Upscale",
+        EnhanceMode.FULL:       "🔥 Full (FREE)",
     }
     await query.edit_message_text(
         f"{mode_labels[mode]} shuru ho raha hai… ⏳\n_(30–90 seconds lagenge)_",
