@@ -24,9 +24,7 @@ async def send_local_file(update: Update, path: Path):
     size_mb = path.stat().st_size / (1024 * 1024)
     if size_mb > config.MAX_SEND_MB:
         path.unlink(missing_ok=True)
-        await update.message.reply_text(
-            f"File bahut badi hai ({size_mb:.1f} MB). Telegram limit ~50MB."
-        )
+        await update.message.reply_text("Yeh file bahut badi hai.")
         return
 
     name = path.name
@@ -58,6 +56,6 @@ async def send_local_file(update: Update, path: Path):
                 )
     except Exception as e:
         logger.exception("send_local_file failed")
-        await update.message.reply_text(f"Bhej nahi paya: {str(e)[:150]}")
+        await update.message.reply_text("Abhi bhej nahi paayi, thodi der baad try karo.")
     finally:
         path.unlink(missing_ok=True)

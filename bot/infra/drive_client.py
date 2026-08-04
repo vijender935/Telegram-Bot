@@ -131,7 +131,7 @@ class DriveClient:
                 lines.append(f"{i}. {f['name']}  [{tag}]")
 
         self.serial_store.set_list(user_id, entries)
-        lines.append("\nDownload: 3 download karo  ya  /download 3")
+        lines.append("\nNumber bhej dena agar koi file chahiye.")
         return "\n".join(lines)
 
     def download_to_path(self, file_id: str, dest: Path, mime: str = "") -> None:

@@ -35,13 +35,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     memory = context.application.bot_data["memory"]
     memory.clear_history(update.effective_user.id)
-    await update.message.reply_text(
-        "Hlo baby 😈\n\n"
-        "Normal baat karo — main mood mein reply dungi.\n"
-        "Voice / audio / video bhejo → transcript.\n"
-        "Map folder list karo / 3 download karo.\n"
-        "Vibe change: /mood"
-    )
+    await update.message.reply_text("Hlo 😈")
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -104,7 +98,7 @@ async def cmd_drive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     drive = _get_drive(context)
     if not drive:
-        await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+        await update.message.reply_text("Abhi files nahi khol pa rahi.")
         return
     text = drive.list_files(update.effective_user.id, "root")
     await send_long_text(update, text)
@@ -115,7 +109,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     drive = _get_drive(context)
     if not drive:
-        await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+        await update.message.reply_text("Abhi files nahi khol pa rahi.")
         return
     sub = " ".join(context.args) if context.args else "root"
     text = drive.list_files(update.effective_user.id, sub)
@@ -139,7 +133,7 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     drive = _get_drive(context)
     if not drive:
-        await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+        await update.message.reply_text("Abhi files nahi khol pa rahi.")
         return
     await send_long_text(update, drive.search(" ".join(context.args)))
 
@@ -150,7 +144,7 @@ async def cmd_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sandbox = context.application.bot_data["sandbox"]
     drive = _get_drive(context)
     if not drive:
-        await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+        await update.message.reply_text("Abhi files nahi khol pa rahi.")
         return
     if not context.args:
         await update.message.reply_text("Usage: /upload <local_filename>")
@@ -221,11 +215,11 @@ async def _send_media_with_followup(update, context, local_name: str, uid: int):
 async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, serial: int, subfolder: str = "root"):
     drive = _get_drive(context)
     if not drive:
-        await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+        await update.message.reply_text("Abhi files nahi khol pa rahi.")
         return
     sandbox = context.application.bot_data["sandbox"]
     uid = update.effective_user.id
-    await update.message.reply_text(f"⬇️ ruki… #{serial} bhejti hoon")
+    await update.message.reply_text("ruki…")
     status, msg = drive.download_by_serial(
         uid, serial, sandbox.root, subfolder=subfolder
     )
@@ -258,12 +252,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if parsed.intent == Intent.DRIVE_RANDOM:
         if not drive:
-            await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+            await update.message.reply_text("Abhi files nahi khol pa rahi.")
             return
         sandbox = context.application.bot_data["sandbox"]
         kind = getattr(parsed, "media_kind", "any") or "any"
         label = {"image": "photo", "video": "video"}.get(kind, "file")
-        await update.message.reply_text(f"🎲 ek {label} choose karti hoon…")
+        await update.message.reply_text("ek sec…")
         status, msg = drive.download_random(
             uid, parsed.subfolder or "root", sandbox.root, media_kind=kind
         )
@@ -275,14 +269,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if parsed.intent == Intent.DRIVE_LIST:
         if not drive:
-            await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+            await update.message.reply_text("Abhi files nahi khol pa rahi.")
             return
         await send_long_text(update, drive.list_files(uid, parsed.subfolder))
         return
 
     if parsed.intent == Intent.DRIVE_SEARCH:
         if not drive:
-            await update.message.reply_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+            await update.message.reply_text("Abhi files nahi khol pa rahi.")
             return
         await send_long_text(update, drive.search(parsed.search_query or text))
         return
@@ -328,7 +322,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.exception("chat failed")
         await update.message.reply_text(
-            f"Error 😤\nTry /drive\n{str(e)[:120]}"
+            "Abhi nahi ho paya, thodi der baad try karo."
         )
 
 
@@ -339,37 +333,51 @@ async def _transcribe_and_reply(update, context, file_bytes: bytes, filename: st
     uid = update.effective_user.id
 
     if not groq_key:
-        await update.message.reply_text("GROQ_API_KEY missing — transcript nahi ho sakta.")
+        await update.message.reply_text("Abhi sun nahi pa rahi.")
         return
 
-    status = await update.message.reply_text(f"🎧 {label} sun rahi hoon, transcript bana rahi hoon…")
+    status = await update.message.reply_text("sun rahi hoon…")
     try:
         transcript = await transcribe_audio(file_bytes, filename, groq_key)
-        # History mein pure transcript mat daalo — bohot lamba ho sakta hai
         preview = transcript if len(transcript) <= 1500 else transcript[:1500] + "…"
         h = memory.get_history(uid)
-        h.append(HumanMessage(content=f"[{label}]\nTranscript: {preview}"))
+        h.append(HumanMessage(content=f"[{label}]\n{preview}"))
         memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
         try:
-            await status.edit_text("📝 Transcript ready:")
+            await status.delete()
         except Exception:
             pass
-        await send_long_text(update, transcript)
+        # Natural reply on what was said (no command brochure)
+        try:
+            llm = context.application.bot_data["llm"]
+            tools = context.application.bot_data["tools"]
+            ctx = build_context_packet(memory, uid, user_text=preview)
+            chain = build_chat_agent(
+                llm,
+                tools,
+                current_mood=ctx["mood"],
+                user_profile=ctx["profile"],
+                session_summary=ctx["session_summary_text"],
+                last_media=ctx["last_media_text"],
+                active_fantasy=ctx["fantasy_text"],
+                emotion=ctx["emotion"],
+            )
+            reply = await chain.ainvoke({"input": preview, "chat_history": h[:-1]})
+            if reply and str(reply).strip():
+                h.append(AIMessage(content=reply))
+                memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
+                await send_long_text(update, reply)
+            else:
+                await send_long_text(update, transcript)
+        except Exception:
+            logger.exception("post-transcript chat failed")
+            await send_long_text(update, transcript)
     except Exception as e:
         logger.exception("transcribe failed")
-        err = str(e)
-        # Telegram Message_too_long kabhi exception message mein aata hai
-        if "Message_too_long" in err or "too long" in err.lower():
-            await status.edit_text("Transcript bahut lamba tha — chunks mein bhej rahi hoon…")
-            # last successful path unlikely; just report
-            await update.message.reply_text(
-                "Transcript fail: message limit. Chhota audio try karo ya dubara bhejo."
-            )
-        else:
-            try:
-                await status.edit_text(f"Transcript fail 😤\n{err[:250]}")
-            except Exception:
-                await update.message.reply_text(f"Transcript fail 😤\n{err[:250]}")
+        try:
+            await status.edit_text("Abhi sun nahi pa rahi, thodi der baad try karo.")
+        except Exception:
+            await update.message.reply_text("Abhi sun nahi pa rahi, thodi der baad try karo.")
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -564,7 +572,7 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if action == "fileact_upload":
         if not drive:
-            await query.edit_message_text("⚠️ Drive connect nahi hai — GOOGLE credentials check karo.")
+            await query.edit_message_text("Abhi files nahi khol pa rahi.")
             return
         if not path.exists():
             await query.edit_message_text("File missing.")
@@ -624,12 +632,8 @@ async def _ask_enhance_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     context.user_data["enhance_file"] = local_name
     keyboard = [[InlineKeyboardButton(t, callback_data=d)] for t, d in ENHANCE_ACTIONS]
     await update.message.reply_text(
-        f"📸 Photo mili: `{local_name}`\n\n"
-        "Kya karna hai?\n\n"
-        "🎨 *AI Enhance* — Hugging Face FREE only.\n"
-        "Paid upscale hata diya.",
+        "Photo mili. Enhance karein?",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
     )
 
 

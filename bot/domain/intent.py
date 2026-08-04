@@ -1,4 +1,4 @@
-"""Rule-based intent router — LLM se pehle."""
+"""Thin intent helpers — list only when user clearly asks to list."""
 import re
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -21,32 +21,21 @@ class ParsedIntent:
     media_kind: str = "any"  # any | image | video
 
 
-DRIVE_KEYWORDS = (
-    "drive", "folder", "map", "list", "files",
-    "insta", "picture", "pdf", "audio", "other", "tosspage",
-    "download", "random",
-)
-SEND_MEDIA_RE = (
-    r"\b(photo|photos|pic|pics|image|images|selfie|nudes?|video|videos|clip)s?\b"
-)
-
 SUBFOLDERS = ("insta", "picture", "pdf", "audio", "other", "tosspage", "map")
 
 
-
 def _detect_media_kind(low: str) -> str:
-    """User ne photo manga ya video — random filter ke liye."""
     wants_video = bool(re.search(r"\b(video|videos|clip|clips|reel|reels)\b", low))
     wants_image = bool(re.search(
-        r"\b(photo|photos|pic|pics|image|images|selfie|selfies|nude|nudes|pic\b)\b",
+        r"\b(photo|photos|pic|pics|image|images|selfie|selfies|nude|nudes)\b",
         low,
     ))
     if wants_video and not wants_image:
         return "video"
     if wants_image and not wants_video:
         return "image"
-    # "media bhej" / mixed → any
     return "any"
+
 
 def _detect_subfolder(low: str) -> str:
     for folder in SUBFOLDERS:
@@ -61,60 +50,66 @@ def parse_intent(text: str) -> ParsedIntent:
     if not low:
         return ParsedIntent(Intent.CHAT)
 
-    # Bare serial only: "2" / "12" → download (list pehle se hona chahiye)
+    # Bare serial: "2"
     if re.fullmatch(r"\d{1,3}", low):
         return ParsedIntent(Intent.DRIVE_DOWNLOAD, serial=int(low))
 
-    # Random: "insta se random" / "koi bhi file map se" / "random from picture"
-    if "random" in low or re.search(r"\bkoi\s*(bhi|bi)\b", low):
-        if any(k in low for k in DRIVE_KEYWORDS) or any(f in low for f in SUBFOLDERS):
-            return ParsedIntent(Intent.DRIVE_RANDOM, subfolder=_detect_subfolder(low), media_kind=_detect_media_kind(low))
-
-    # Natural "send me a photo/video" style requests → random media
-    if re.search(
-        r"\b(photo|photos|pic|pics|image|selfie|nudes?|video|clip)s?\b",
-        low,
-    ) and re.search(
-        r"\b(bhej|bhejo|bhejdo|bhej\s*do|send|dikha|dikhao|show|share|do)\b",
-        low,
-    ):
-        return ParsedIntent(Intent.DRIVE_RANDOM, subfolder=_detect_subfolder(low), media_kind=_detect_media_kind(low))
-
-    # short forms: "photo bhej", "pic bhej do", "nude bhejo"
-    if re.search(r"\b(photo|pic|pics|selfie|nude|nudes|video)\s*(bhej|bhejo|bhejdo|send)\b", low):
-        return ParsedIntent(Intent.DRIVE_RANDOM, subfolder=_detect_subfolder(low), media_kind=_detect_media_kind(low))
-
-    # Download with optional folder:
-    # "insta folder se 2 no file download"
-    # "2 download karo"
-    # "download 3 from picture"
+    # Explicit download with number
     m = re.search(
         r"(?:download\s+(\d+)|(\d+)\s*(?:no\.?|number|num)?\s*(?:file)?\s*download|(\d+)\s*download)",
         low,
     )
-    if not m:
-        m = re.search(r"(?:se|from)\s+(\d+)\s*(?:no|number|file)?", low)
-    if m and ("download" in low or "file" in low or any(f in low for f in SUBFOLDERS)):
+    if m:
         serial = int(next(g for g in m.groups() if g))
         return ParsedIntent(
             Intent.DRIVE_DOWNLOAD,
             subfolder=_detect_subfolder(low),
             serial=serial,
         )
-    # "2 download" already covered; plain "download 2"
-    m2 = re.search(r"download\s+(\d+)", low)
-    if m2:
+
+    # Natural send media request
+    if re.search(
+        r"\b(photo|photos|pic|pics|image|images|selfie|nudes?|video|videos|clip)s?\b",
+        low,
+    ) and re.search(
+        r"\b(bhej|bhejo|bhejdo|bhej\s*do|send|dikha|dikhao|show|share|de\s*do|do)\b",
+        low,
+    ):
         return ParsedIntent(
-            Intent.DRIVE_DOWNLOAD,
+            Intent.DRIVE_RANDOM,
             subfolder=_detect_subfolder(low),
-            serial=int(m2.group(1)),
+            media_kind=_detect_media_kind(low),
         )
 
+    if re.search(r"\b(photo|pic|pics|selfie|nude|nudes|video)\s*(bhej|bhejo|bhejdo|send)\b", low):
+        return ParsedIntent(
+            Intent.DRIVE_RANDOM,
+            subfolder=_detect_subfolder(low),
+            media_kind=_detect_media_kind(low),
+        )
+
+    # Random file
+    if "random" in low or re.search(r"\bkoi\s*(bhi|bi)\b", low):
+        if any(f in low for f in SUBFOLDERS) or "folder" in low or "map" in low or "drive" in low:
+            return ParsedIntent(
+                Intent.DRIVE_RANDOM,
+                subfolder=_detect_subfolder(low),
+                media_kind=_detect_media_kind(low),
+            )
+
+    # Search only if clearly search
     if low.startswith("/search") or low.startswith("search "):
         q = re.sub(r"^/?search\s*", "", raw, flags=re.I).strip()
         return ParsedIntent(Intent.DRIVE_SEARCH, search_query=q)
 
-    if any(k in low for k in DRIVE_KEYWORDS):
+    # LIST only when user clearly wants a list
+    list_markers = (
+        "list", "lists", "folder list", "files list", "kya hai", "kya kya",
+        "dikhao folder", "folder dikhao", "map dikhao", "folder dikha",
+    )
+    if any(m in low for m in list_markers) or re.search(
+        r"\b(folder|map|drive)\b.*\b(dikha|dikhao|bata|batao|list)\b", low
+    ) or re.search(r"\b(dikha|dikhao|bata|batao|list)\b.*\b(folder|map|drive|files)\b", low):
         return ParsedIntent(Intent.DRIVE_LIST, subfolder=_detect_subfolder(low))
 
     return ParsedIntent(Intent.CHAT)
