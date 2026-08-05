@@ -434,6 +434,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_long_text(update, drive.search(parsed.search_query or text))
         return
 
+    if parsed.intent == Intent.VOICE:
+        await cmd_voice(update, context)
+        return
+
+    if parsed.intent == Intent.VAULT_ADD:
+        await cmd_vault_add(update, context)
+        return
+
+    if parsed.intent == Intent.VAULT_LIST:
+        # For natural language, we need to handle the code. 
+        # If not provided, we ask or check if a session code exists.
+        await cmd_vault_list(update, context)
+        return
+
+    if parsed.intent == Intent.VAULT_OPEN:
+        await cmd_vault_open(update, context)
+        return
+
     # CHAT — rich context packet (mood, profile, media, session, emotion)
     history = memory.get_history(uid)
     ctx = build_context_packet(memory, uid, user_text=text)
