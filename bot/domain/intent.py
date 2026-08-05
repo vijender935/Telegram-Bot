@@ -9,6 +9,10 @@ class Intent(Enum):
     DRIVE_DOWNLOAD = auto()
     DRIVE_RANDOM = auto()
     DRIVE_SEARCH = auto()
+    VOICE = auto()
+    VAULT_ADD = auto()
+    VAULT_LIST = auto()
+    VAULT_OPEN = auto()
     CHAT = auto()
 
 
@@ -87,6 +91,29 @@ def parse_intent(text: str) -> ParsedIntent:
             subfolder=_detect_subfolder(low),
             media_kind=_detect_media_kind(low),
         )
+
+    # Voice intent
+    voice_markers = (
+        "bol kar sunao", "bol ke sunao", "bol ke batao", "voice note", 
+        "audio bhej", "audio sunao", "suna do", "sunaao", "bol do"
+    )
+    if any(m in low for m in voice_markers) or re.search(r"\b(voice|audio|suna)\b.*\b(bhej|do|sunao)\b", low):
+        return ParsedIntent(Intent.VOICE)
+
+    # Vault intents
+    vault_markers = ("vault", "secret", "tijori", "khufiya", "khufia", "safe")
+    
+    # Vault List
+    if any(m in low for m in vault_markers) and any(x in low for x in ("dikha", "bata", "list", "kya hai", "kya kya")):
+        return ParsedIntent(Intent.VAULT_LIST)
+    
+    # Vault Add
+    if any(m in low for m in vault_markers) and any(x in low for x in ("save", "daal", "rakh", "add", "store", "bhej")):
+        return ParsedIntent(Intent.VAULT_ADD)
+    
+    # Vault Open
+    if any(m in low for m in vault_markers) and any(x in low for x in ("khol", "open", "nikal")):
+        return ParsedIntent(Intent.VAULT_OPEN)
 
     # Random file
     if "random" in low or re.search(r"\bkoi\s*(bhi|bi)\b", low):

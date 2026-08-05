@@ -15,6 +15,7 @@ from bot.agent.chat_agent import build_chat_agent
 from bot.gateway.formatters import send_long_text, send_local_file
 from bot.infra.transcribe import transcribe_audio, extract_audio_from_video
 from bot.infra.media_describe import describe_media_path, is_image, is_video
+from bot.infra.tts import generate_voice_note
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,17 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     memory = context.application.bot_data["memory"]
     memory.clear_history(update.effective_user.id)
-    await update.message.reply_text("Hlo 😈")
+    
+    welcome_text = (
+        "Hlo 😈\n\n"
+        "Main update ho gayi hoon! Ab mere paas:\n"
+        "🕒 **Time Awareness:** Main waqt ke hisaab se react karungi.\n"
+        "🎙 **Voice Notes:** Kisi bhi reply ke baad `/voice` likho, main bol kar sunaungi.\n"
+        "👁 **Enhanced Vision:** Photos par mere reactions ab aur bhi personal honge.\n"
+        "🎭 **Dynamic Moods:** `/mood` se mera vibe change karo.\n\n"
+        "Batao, aaj raat kya plan hai? 😏"
+    )
+    await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -229,6 +240,148 @@ async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, seria
     await _send_media_with_followup(update, context, msg, uid)
 
 
+async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate a voice note of the last bot reply or custom text."""
+    if not _allowed(update.effective_user.id):
+        return
+    uid = update.effective_user.id
+    memory = context.application.bot_data["memory"]
+    history = memory.get_history(uid)
+    
+    text = " ".join(context.args) if context.args else ""
+    if not text:
+        # Get last AI message
+        for msg in reversed(history):
+            if isinstance(msg, AIMessage):
+                text = msg.content
+                break
+    
+    if not text:
+        await update.message.reply_text("Pehle kuch baat toh karo, tabhi toh bolungi 😏")
+        return
+
+    await update.message.reply_text("Ek sec, voice note bhej rahi hoon...")
+    
+    sandbox = context.application.bot_data["sandbox"]
+    filename = f"voice_{uid}.mp3"
+    path = sandbox.path_for(filename)
+    
+    if generate_voice_note(text, path):
+        await update.message.reply_voice(voice=open(path, 'rb'))
+        os.remove(path)
+    else:
+        await update.message.reply_text("Abhi gala kharab hai, baad mein try karna.")
+
+# ───────────── vault handlers ─────────────
+
+async def cmd_vault_setcode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /vault_setcode <code>\nExample: /vault_setcode 1234")
+        return
+    code = context.args[0]
+    memory = context.application.bot_data["memory"]
+    memory.set_vault_code(update.effective_user.id, code)
+    await update.message.reply_text(f"✅ Secret code set ho gaya hai. Ab aap apni private memories vault mein save kar sakte hain. 🤫")
+
+async def cmd_vault_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    uid = update.effective_user.id
+    memory = context.application.bot_data["memory"]
+    last_media = memory.get_last_media(uid)
+    
+    if not last_media:
+        await update.message.reply_text("Abhi koi media nahi mili jo main vault mein daal sakun. Pehle kuch bhej toh sahi... 😏")
+        return
+    
+    label = " ".join(context.args) if context.args else "Secret"
+    memory.add_vault_entry(uid, last_media["file_key"], last_media["name"], label, last_media["description"])
+    await update.message.reply_text(f"🔒 Yeh memory ('{label}') ab hamare secret vault mein safe hai. Sirf hamare liye... 😈")
+
+async def cmd_vault_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    uid = update.effective_user.id
+    memory = context.application.bot_data["memory"]
+    saved_code = memory.get_vault_code(uid)
+    
+    if not saved_code:
+        await update.message.reply_text("Pehle /vault_setcode se ek code set karo.")
+        return
+    
+    if not context.args or context.args[0] != saved_code:
+        await update.message.reply_text("❌ Galat code! Vault kholne ke liye sahi code chahiye... try again. 😏")
+        return
+    
+    entries = memory.get_vault_entries(uid)
+    if not entries:
+        await update.message.reply_text("Vault abhi khali hai. Kuch 'khas' add karo na... 😈")
+        return
+    
+    text = "🔒 **Hamari Secret Memories:**\n\n"
+    for e in entries:
+        text += f"ID: `{e['id']}` | Label: **{e['label']}** | {e['file_name']}\n"
+    
+    text += "\nKholne ke liye: `/vault_open <id> <code>`"
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def cmd_vault_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /vault_open <id> <code>")
+        return
+    
+    entry_id = int(context.args[0])
+    code = context.args[1]
+    uid = update.effective_user.id
+    memory = context.application.bot_data["memory"]
+    
+    saved_code = memory.get_vault_code(uid)
+    if code != saved_code:
+        await update.message.reply_text("❌ Galat code! Tumhe lagta hai main itni asani se dikha dungi? 😏")
+        return
+    
+    entries = memory.get_vault_entries(uid)
+    target = next((e for e in entries if e["id"] == entry_id), None)
+    
+    if not target:
+        await update.message.reply_text("Yeh ID toh nahi mili.")
+        return
+    
+    await update.message.reply_text("Ruko, vault se nikal rahi hoon... 🤫")
+    # In this implementation, file_id is stored in file_key field of vault_entries
+    try:
+        # Check if it's a file_id or local path. 
+        # The existing system uses file_key as local filename for media_memory.
+        # But for vault, we might want to store Telegram file_id.
+        # Let's assume for now it's a file_id if it looks like one.
+        await update.message.reply_document(document=target["file_id"], caption=f"Hamari memory: {target['label']}")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+async def cmd_vault_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /vault_del <id> <code>")
+        return
+    
+    entry_id = int(context.args[0])
+    code = context.args[1]
+    uid = update.effective_user.id
+    memory = context.application.bot_data["memory"]
+    
+    saved_code = memory.get_vault_code(uid)
+    if code != saved_code:
+        await update.message.reply_text("❌ Galat code!")
+        return
+    
+    memory.delete_vault_entry(uid, entry_id)
+    await update.message.reply_text(f"✅ Memory ID {entry_id} delete ho gayi. Ab wo sirf hamare dimaag mein rahegi... 😈")
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not _allowed(uid):
@@ -281,6 +434,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_long_text(update, drive.search(parsed.search_query or text))
         return
 
+    if parsed.intent == Intent.VOICE:
+        await cmd_voice(update, context)
+        return
+
+    if parsed.intent == Intent.VAULT_ADD:
+        await cmd_vault_add(update, context)
+        return
+
+    if parsed.intent == Intent.VAULT_LIST:
+        # For natural language, we need to handle the code. 
+        # If not provided, we ask or check if a session code exists.
+        await cmd_vault_list(update, context)
+        return
+
+    if parsed.intent == Intent.VAULT_OPEN:
+        await cmd_vault_open(update, context)
+        return
+
     # CHAT — rich context packet (mood, profile, media, session, emotion)
     history = memory.get_history(uid)
     ctx = build_context_packet(memory, uid, user_text=text)
@@ -293,16 +464,64 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_media=ctx["last_media_text"],
         active_fantasy=ctx["fantasy_text"],
         emotion=ctx["emotion"],
+        time_context=ctx["time_context"],
     )
 
     try:
         reply = await chain.ainvoke({"input": text, "chat_history": history})
         if not reply or not str(reply).strip():
             reply = "Hmm... bol na, sun rahi hoon 😏"
+        
+        # Action Tag Processing
+        do_voice = False
+        do_vault_add = None
+        do_vault_list = False
+        do_vault_open = None
+
+        if "[VOICE]" in reply:
+            do_voice = True
+            reply = reply.replace("[VOICE]", "").strip()
+        
+        vault_add_match = re.search(r"\[VAULT_ADD:\s*(.*?)\]", reply)
+        if vault_add_match:
+            do_vault_add = vault_add_match.group(1)
+            reply = re.sub(r"\[VAULT_ADD:.*?\]", "", reply).strip()
+        
+        if "[VAULT_LIST]" in reply:
+            do_vault_list = True
+            reply = reply.replace("[VAULT_LIST]", "").strip()
+        
+        vault_open_match = re.search(r"\[VAULT_OPEN:\s*(\d+)\]", reply)
+        if vault_open_match:
+            do_vault_open = int(vault_open_match.group(1))
+            reply = re.sub(r"\[VAULT_OPEN:.*?\]", "", reply).strip()
+
         history.append(HumanMessage(content=text))
         history.append(AIMessage(content=reply))
         memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
-        await send_long_text(update, reply)
+        
+        if reply:
+            await send_long_text(update, reply)
+        
+        # Execute Actions
+        if do_voice:
+            context.args = [reply]
+            await cmd_voice(update, context)
+        
+        if do_vault_add:
+            context.args = [do_vault_add]
+            await cmd_vault_add(update, context)
+        
+        if do_vault_list:
+            # We still need the code for security, but the AI triggered the list
+            saved_code = memory.get_vault_code(uid)
+            context.args = [saved_code] if saved_code else []
+            await cmd_vault_list(update, context)
+        
+        if do_vault_open:
+            saved_code = memory.get_vault_code(uid)
+            context.args = [str(do_vault_open), saved_code] if saved_code else [str(do_vault_open)]
+            await cmd_vault_open(update, context)
 
         if should_extract(text):
             try:
@@ -361,6 +580,7 @@ async def _transcribe_and_reply(update, context, file_bytes: bytes, filename: st
                 last_media=ctx["last_media_text"],
                 active_fantasy=ctx["fantasy_text"],
                 emotion=ctx["emotion"],
+                time_context=ctx["time_context"],
             )
             reply = await chain.ainvoke({"input": preview, "chat_history": h[:-1]})
             if reply and str(reply).strip():
