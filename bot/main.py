@@ -23,6 +23,7 @@ from bot.gateway.handlers import (
     enhance_callback, cmd_enhance,
     cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_mood, mood_callback,
     cmd_voice,
+    cmd_vault_setcode, cmd_vault_add, cmd_vault_list, cmd_vault_open, cmd_vault_del,
     cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
     handle_text, handle_document, handle_photo, handle_voice,
     handle_audio, handle_video, handle_video_note, file_action_callback,
@@ -95,6 +96,11 @@ async def run_bot():
     app.add_handler(CommandHandler("forgetprofile", cmd_forgetprofile))
     app.add_handler(CommandHandler("mood", cmd_mood))
     app.add_handler(CommandHandler("voice", cmd_voice))
+    app.add_handler(CommandHandler("vault_setcode", cmd_vault_setcode))
+    app.add_handler(CommandHandler("vault_add", cmd_vault_add))
+    app.add_handler(CommandHandler("vault_list", cmd_vault_list))
+    app.add_handler(CommandHandler("vault_open", cmd_vault_open))
+    app.add_handler(CommandHandler("vault_del", cmd_vault_del))
     app.add_handler(CallbackQueryHandler(mood_callback, pattern="^mood_"))
     app.add_handler(CallbackQueryHandler(file_action_callback, pattern="^fileact_"))
     app.add_handler(CallbackQueryHandler(enhance_callback, pattern="^enhance_"))

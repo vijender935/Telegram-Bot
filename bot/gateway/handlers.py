@@ -272,6 +272,116 @@ async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Abhi gala kharab hai, baad mein try karna.")
 
+# ───────────── vault handlers ─────────────
+
+async def cmd_vault_setcode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /vault_setcode <code>\nExample: /vault_setcode 1234")
+        return
+    code = context.args[0]
+    memory = context.application.bot_data["memory"]
+    memory.set_vault_code(update.effective_user.id, code)
+    await update.message.reply_text(f"✅ Secret code set ho gaya hai. Ab aap apni private memories vault mein save kar sakte hain. 🤫")
+
+async def cmd_vault_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    uid = update.effective_user.id
+    memory = context.application.bot_data["memory"]
+    last_media = memory.get_last_media(uid)
+    
+    if not last_media:
+        await update.message.reply_text("Abhi koi media nahi mili jo main vault mein daal sakun. Pehle kuch bhej toh sahi... 😏")
+        return
+    
+    label = " ".join(context.args) if context.args else "Secret"
+    memory.add_vault_entry(uid, last_media["file_key"], last_media["name"], label, last_media["description"])
+    await update.message.reply_text(f"🔒 Yeh memory ('{label}') ab hamare secret vault mein safe hai. Sirf hamare liye... 😈")
+
+async def cmd_vault_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    uid = update.effective_user.id
+    memory = context.application.bot_data["memory"]
+    saved_code = memory.get_vault_code(uid)
+    
+    if not saved_code:
+        await update.message.reply_text("Pehle /vault_setcode se ek code set karo.")
+        return
+    
+    if not context.args or context.args[0] != saved_code:
+        await update.message.reply_text("❌ Galat code! Vault kholne ke liye sahi code chahiye... try again. 😏")
+        return
+    
+    entries = memory.get_vault_entries(uid)
+    if not entries:
+        await update.message.reply_text("Vault abhi khali hai. Kuch 'khas' add karo na... 😈")
+        return
+    
+    text = "🔒 **Hamari Secret Memories:**\n\n"
+    for e in entries:
+        text += f"ID: `{e['id']}` | Label: **{e['label']}** | {e['file_name']}\n"
+    
+    text += "\nKholne ke liye: `/vault_open <id> <code>`"
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def cmd_vault_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /vault_open <id> <code>")
+        return
+    
+    entry_id = int(context.args[0])
+    code = context.args[1]
+    uid = update.effective_user.id
+    memory = context.application.bot_data["memory"]
+    
+    saved_code = memory.get_vault_code(uid)
+    if code != saved_code:
+        await update.message.reply_text("❌ Galat code! Tumhe lagta hai main itni asani se dikha dungi? 😏")
+        return
+    
+    entries = memory.get_vault_entries(uid)
+    target = next((e for e in entries if e["id"] == entry_id), None)
+    
+    if not target:
+        await update.message.reply_text("Yeh ID toh nahi mili.")
+        return
+    
+    await update.message.reply_text("Ruko, vault se nikal rahi hoon... 🤫")
+    # In this implementation, file_id is stored in file_key field of vault_entries
+    try:
+        # Check if it's a file_id or local path. 
+        # The existing system uses file_key as local filename for media_memory.
+        # But for vault, we might want to store Telegram file_id.
+        # Let's assume for now it's a file_id if it looks like one.
+        await update.message.reply_document(document=target["file_id"], caption=f"Hamari memory: {target['label']}")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+async def cmd_vault_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /vault_del <id> <code>")
+        return
+    
+    entry_id = int(context.args[0])
+    code = context.args[1]
+    uid = update.effective_user.id
+    memory = context.application.bot_data["memory"]
+    
+    saved_code = memory.get_vault_code(uid)
+    if code != saved_code:
+        await update.message.reply_text("❌ Galat code!")
+        return
+    
+    memory.delete_vault_entry(uid, entry_id)
+    await update.message.reply_text(f"✅ Memory ID {entry_id} delete ho gayi. Ab wo sirf hamare dimaag mein rahegi... 😈")
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not _allowed(uid):

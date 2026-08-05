@@ -104,6 +104,28 @@ class MemoryStore:
                         created_at DOUBLE PRECISION
                     )
                 """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS vault_codes (
+                        user_id BIGINT PRIMARY KEY,
+                        code TEXT NOT NULL,
+                        updated_at DOUBLE PRECISION
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS vault_entries (
+                        id SERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL,
+                        file_id TEXT NOT NULL,
+                        file_name TEXT,
+                        label TEXT,
+                        description TEXT,
+                        created_at DOUBLE PRECISION
+                    )
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_vault_user
+                    ON vault_entries(user_id, created_at DESC)
+                """)
             conn.commit()
         finally:
             self._put(conn)
@@ -361,6 +383,66 @@ class MemoryStore:
         try:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM active_fantasy WHERE user_id = %s", (user_id,))
+            conn.commit()
+        finally:
+            self._put(conn)
+
+    # ───────────── vault ─────────────
+    def set_vault_code(self, user_id: int, code: str):
+        conn = self._conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO vault_codes (user_id, code, updated_at) VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE SET code = EXCLUDED.code, updated_at = EXCLUDED.updated_at
+                """, (user_id, str(code), time.time()))
+            conn.commit()
+        finally:
+            self._put(conn)
+
+    def get_vault_code(self, user_id: int) -> str | None:
+        conn = self._conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT code FROM vault_codes WHERE user_id = %s", (user_id,))
+                row = cur.fetchone()
+        finally:
+            self._put(conn)
+        return row[0] if row else None
+
+    def add_vault_entry(self, user_id: int, file_id: str, file_name: str = None, label: str = None, description: str = None):
+        conn = self._conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO vault_entries (user_id, file_id, file_name, label, description, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (user_id, file_id, file_name, label, description, time.time()))
+            conn.commit()
+        finally:
+            self._put(conn)
+
+    def get_vault_entries(self, user_id: int) -> list[dict]:
+        conn = self._conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, file_id, file_name, label, description, created_at
+                    FROM vault_entries WHERE user_id = %s ORDER BY created_at DESC
+                """, (user_id,))
+                rows = cur.fetchall()
+        finally:
+            self._put(conn)
+        return [
+            {"id": r[0], "file_id": r[1], "file_name": r[2], "label": r[3], "description": r[4], "created_at": r[5]}
+            for r in rows
+        ]
+
+    def delete_vault_entry(self, user_id: int, entry_id: int):
+        conn = self._conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM vault_entries WHERE user_id = %s AND id = %s", (user_id, entry_id))
             conn.commit()
         finally:
             self._put(conn)
