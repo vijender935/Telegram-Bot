@@ -90,15 +90,20 @@ def media_followup_lines(description: str, mood: str) -> str:
     mood_l = (mood or "").lower()
     if "soft" in mood_l or "romantic" in mood_l:
         return (
-            f"yeh dekh…\n{snippet}\n\n"
-            "bata kaisa laga. aaj thoda slow chal sakte hain."
+            f"yeh sirf tumhare liye…\n{snippet}\n\n"
+            "kaise lag rahi hoon? aaj bas tumhare paas rehne ka mann hai."
         )
     if "rough" in mood_l or "punish" in mood_l or "femdom" in mood_l:
         return (
-            f"yeh dekh ke bol.\n{snippet}\n\n"
-            "ab ispe focus kar. distract mat ho."
+            f"isse dekh aur tadap…\n{snippet}\n\n"
+            "ab chup-chaap ise dekh aur bata, kya karun tumhare saath?"
+        )
+    if "horny" in mood_l or "dirty" in mood_l:
+        return (
+            f"uff, yeh dekho…\n{snippet}\n\n"
+            "ise dekh kar mera toh bura haal ho raha hai... tumhara kya scene hai? 😈"
         )
     return (
-        f"yeh wali bheji maine…\n{snippet}\n\n"
-        "bata — ispe kya karna hai next?"
+        f"yeh dekho, abhi bheji maine…\n{snippet}\n\n"
+        "batao, iske baad kya plan hai? main toh ready hoon... 😏"
     )

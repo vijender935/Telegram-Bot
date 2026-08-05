@@ -8,7 +8,8 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     ("horny", (
         "chod", "lund", "chut", "gaand", "sex", "horny", "geeli", "jhad", "cum",
         "fuck", "nude", "nangi", "panty", "boobs", "nipple", "suck", "blow",
-        "dirty", "gandi", "garam", "mast", "hot",
+        "dirty", "gandi", "garam", "mast", "hot", "ah", "mmm", "uff", "physical",
+        "bed", "bistar", "raat", "night", "touch", "chu",
     )),
     ("dominant", (
         "dominate", "mistress", "slave", "kutta", "saza", "punish", "obey",
@@ -16,7 +17,7 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     )),
     ("soft", (
         "miss", "pyaar", "love", "hug", "romantic", "soft", "cuddle", "yaad",
-        "dil", "sweet",
+        "dil", "sweet", "partner", "humsafar", "jaan", "baby", "shona",
     )),
     ("bored", (
         "boring", "bore", "kuch nahi", "idle", "timepass",
