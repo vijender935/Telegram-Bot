@@ -467,30 +467,77 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         time_context=ctx["time_context"],
     )
 
-    try:
-        reply = await chain.ainvoke({"input": text, "chat_history": history})
-        if not reply or not str(reply).strip():
-            reply = "Hmm... bol na, sun rahi hoon 😏"
-        history.append(HumanMessage(content=text))
-        history.append(AIMessage(content=reply))
-        memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
-        await send_long_text(update, reply)
-
-        if should_extract(text):
-            try:
-                updated = await extract_and_merge(llm, ctx["profile"] or empty_profile(), text, reply)
-                memory.set_profile(uid, updated)
-                # ongoing fantasy field
-                if updated.get("ongoing_fantasy"):
-                    memory.set_fantasy(uid, updated["ongoing_fantasy"])
-                logger.info("profile updated for user %s", uid)
-            except Exception:
-                logger.exception("learning update failed")
-
         try:
-            await maybe_update_session_summary(llm, memory, uid, text, reply)
-        except Exception:
-            logger.exception("session summary side-effect failed")
+            reply = await chain.ainvoke({"input": text, "chat_history": history})
+            if not reply or not str(reply).strip():
+                reply = "Hmm... bol na, sun rahi hoon 😏"
+            
+            # Action Tag Processing
+            do_voice = False
+            do_vault_add = None
+            do_vault_list = False
+            do_vault_open = None
+
+            if "[VOICE]" in reply:
+                do_voice = True
+                reply = reply.replace("[VOICE]", "").strip()
+            
+            vault_add_match = re.search(r"\[VAULT_ADD:\s*(.*?)\]", reply)
+            if vault_add_match:
+                do_vault_add = vault_add_match.group(1)
+                reply = re.sub(r"\[VAULT_ADD:.*?\]", "", reply).strip()
+            
+            if "[VAULT_LIST]" in reply:
+                do_vault_list = True
+                reply = reply.replace("[VAULT_LIST]", "").strip()
+            
+            vault_open_match = re.search(r"\[VAULT_OPEN:\s*(\d+)\]", reply)
+            if vault_open_match:
+                do_vault_open = int(vault_open_match.group(1))
+                reply = re.sub(r"\[VAULT_OPEN:.*?\]", "", reply).strip()
+
+            history.append(HumanMessage(content=text))
+            history.append(AIMessage(content=reply))
+            memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
+            
+            if reply:
+                await send_long_text(update, reply)
+            
+            # Execute Actions
+            if do_voice:
+                context.args = [reply]
+                await cmd_voice(update, context)
+            
+            if do_vault_add:
+                context.args = [do_vault_add]
+                await cmd_vault_add(update, context)
+            
+            if do_vault_list:
+                # We still need the code for security, but the AI triggered the list
+                saved_code = memory.get_vault_code(uid)
+                context.args = [saved_code] if saved_code else []
+                await cmd_vault_list(update, context)
+            
+            if do_vault_open:
+                saved_code = memory.get_vault_code(uid)
+                context.args = [str(do_vault_open), saved_code] if saved_code else [str(do_vault_open)]
+                await cmd_vault_open(update, context)
+
+            if should_extract(text):
+                try:
+                    updated = await extract_and_merge(llm, ctx["profile"] or empty_profile(), text, reply)
+                    memory.set_profile(uid, updated)
+                    # ongoing fantasy field
+                    if updated.get("ongoing_fantasy"):
+                        memory.set_fantasy(uid, updated["ongoing_fantasy"])
+                    logger.info("profile updated for user %s", uid)
+                except Exception:
+                    logger.exception("learning update failed")
+
+            try:
+                await maybe_update_session_summary(llm, memory, uid, text, reply)
+            except Exception:
+                logger.exception("session summary side-effect failed")
     except Exception as e:
         logger.exception("chat failed")
         await update.message.reply_text(
