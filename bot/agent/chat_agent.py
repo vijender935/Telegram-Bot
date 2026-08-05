@@ -15,6 +15,7 @@ def build_chat_agent(
     last_media: str = "",
     active_fantasy: str = "",
     emotion: str = "neutral",
+    time_context: str = "Night time vibe.",
 ):
     """Simple chat chain with rich context injection."""
     system = SYSTEM_PROMPT.format(
@@ -24,6 +25,7 @@ def build_chat_agent(
         last_media=last_media or "(no recent media shared)",
         active_fantasy=active_fantasy or "(none)",
         emotion=emotion or "neutral",
+        time_context=time_context,
     )
     prompt = ChatPromptTemplate.from_messages([
         ("system", system),

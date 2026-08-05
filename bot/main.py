@@ -22,6 +22,7 @@ from bot.agent.tools import build_tools
 from bot.gateway.handlers import (
     enhance_callback, cmd_enhance,
     cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_mood, mood_callback,
+    cmd_voice,
     cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
     handle_text, handle_document, handle_photo, handle_voice,
     handle_audio, handle_video, handle_video_note, file_action_callback,
@@ -93,6 +94,7 @@ async def run_bot():
     app.add_handler(CommandHandler("profile", cmd_profile))
     app.add_handler(CommandHandler("forgetprofile", cmd_forgetprofile))
     app.add_handler(CommandHandler("mood", cmd_mood))
+    app.add_handler(CommandHandler("voice", cmd_voice))
     app.add_handler(CallbackQueryHandler(mood_callback, pattern="^mood_"))
     app.add_handler(CallbackQueryHandler(file_action_callback, pattern="^fileact_"))
     app.add_handler(CallbackQueryHandler(enhance_callback, pattern="^enhance_"))
@@ -110,6 +112,28 @@ async def run_bot():
     app.add_handler(MessageHandler(filters.AUDIO, handle_audio))
     app.add_handler(MessageHandler(filters.VIDEO, handle_video))
     app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
+
+    async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
+        """Randomly ping allowed users to keep the vibe alive."""
+        if not config.ALLOWED_USER_IDS:
+            return
+        import random
+        uid = random.choice(config.ALLOWED_USER_IDS)
+        msgs = [
+            "Kya kar rahe ho? 😏",
+            "Yaad aa rahi thi... kya chal raha hai?",
+            "Ek mast cheez dekhi maine abhi... sunoge?",
+            "Soye nahi abhi tak? 😈",
+            "Bohot chup ho aaj, sab theek?"
+        ]
+        try:
+            await context.bot.send_message(chat_id=uid, text=random.choice(msgs))
+        except Exception:
+            pass
+
+    # Schedule proactive ping every 4-8 hours
+    if app.job_queue:
+        app.job_queue.run_repeating(proactive_ping, interval=3600 * 6, first=3600)
 
     logger.info(
         "Bot v2 started | temp=%s | vision=%s | describe=%s",

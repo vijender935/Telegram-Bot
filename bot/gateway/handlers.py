@@ -15,6 +15,7 @@ from bot.agent.chat_agent import build_chat_agent
 from bot.gateway.formatters import send_long_text, send_local_file
 from bot.infra.transcribe import transcribe_audio, extract_audio_from_video
 from bot.infra.media_describe import describe_media_path, is_image, is_video
+from bot.infra.tts import generate_voice_note
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,17 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     memory = context.application.bot_data["memory"]
     memory.clear_history(update.effective_user.id)
-    await update.message.reply_text("Hlo 😈")
+    
+    welcome_text = (
+        "Hlo 😈\n\n"
+        "Main update ho gayi hoon! Ab mere paas:\n"
+        "🕒 **Time Awareness:** Main waqt ke hisaab se react karungi.\n"
+        "🎙 **Voice Notes:** Kisi bhi reply ke baad `/voice` likho, main bol kar sunaungi.\n"
+        "👁 **Enhanced Vision:** Photos par mere reactions ab aur bhi personal honge.\n"
+        "🎭 **Dynamic Moods:** `/mood` se mera vibe change karo.\n\n"
+        "Batao, aaj raat kya plan hai? 😏"
+    )
+    await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -229,6 +240,38 @@ async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, seria
     await _send_media_with_followup(update, context, msg, uid)
 
 
+async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate a voice note of the last bot reply or custom text."""
+    if not _allowed(update.effective_user.id):
+        return
+    uid = update.effective_user.id
+    memory = context.application.bot_data["memory"]
+    history = memory.get_history(uid)
+    
+    text = " ".join(context.args) if context.args else ""
+    if not text:
+        # Get last AI message
+        for msg in reversed(history):
+            if isinstance(msg, AIMessage):
+                text = msg.content
+                break
+    
+    if not text:
+        await update.message.reply_text("Pehle kuch baat toh karo, tabhi toh bolungi 😏")
+        return
+
+    await update.message.reply_text("Ek sec, voice note bhej rahi hoon...")
+    
+    sandbox = context.application.bot_data["sandbox"]
+    filename = f"voice_{uid}.mp3"
+    path = sandbox.path_for(filename)
+    
+    if generate_voice_note(text, path):
+        await update.message.reply_voice(voice=open(path, 'rb'))
+        os.remove(path)
+    else:
+        await update.message.reply_text("Abhi gala kharab hai, baad mein try karna.")
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not _allowed(uid):
@@ -293,6 +336,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_media=ctx["last_media_text"],
         active_fantasy=ctx["fantasy_text"],
         emotion=ctx["emotion"],
+        time_context=ctx["time_context"],
     )
 
     try:
@@ -361,6 +405,7 @@ async def _transcribe_and_reply(update, context, file_bytes: bytes, filename: st
                 last_media=ctx["last_media_text"],
                 active_fantasy=ctx["fantasy_text"],
                 emotion=ctx["emotion"],
+                time_context=ctx["time_context"],
             )
             reply = await chain.ainvoke({"input": preview, "chat_history": h[:-1]})
             if reply and str(reply).strip():

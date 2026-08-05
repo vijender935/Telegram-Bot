@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from bot import config
@@ -30,6 +31,18 @@ def build_context_packet(memory, user_id: int, user_text: str = "") -> dict[str,
     if last_media and user_text and emotion in ("horny", "eager", "dominant"):
         memory.set_last_media_reaction(user_id, user_text[:120])
 
+    # Time context generation
+    now = datetime.now()
+    hour = now.hour
+    if 5 <= hour < 12:
+        time_ctx = "Subah ka waqt hai, thoda sleepy aur fresh vibe."
+    elif 12 <= hour < 17:
+        time_ctx = "Dopehar ho rahi hai, busy din lekin tera khayal aa gaya."
+    elif 17 <= hour < 21:
+        time_ctx = "Shaam ka suhana waqt, relax karne ka mann hai."
+    else:
+        time_ctx = "Late night... sab shaant hai, bas main aur meri baatein."
+
     return {
         "mood": mood,
         "profile": profile,
@@ -40,6 +53,7 @@ def build_context_packet(memory, user_id: int, user_text: str = "") -> dict[str,
         "last_media_text": format_last_media(last_media),
         "session_summary_text": format_session_summary(session_summary),
         "fantasy_text": format_active_fantasy(fantasy),
+        "time_context": time_ctx,
     }
 
 
