@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 import re
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -36,7 +37,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     memory = context.application.bot_data["memory"]
     memory.clear_history(update.effective_user.id)
-    
+
     welcome_text = (
         "Hlo 😈\n\n"
         "Main update ho gayi hoon! Ab mere paas:\n"
@@ -186,7 +187,6 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _describe_and_remember(context, uid: int, local_name: str) -> str:
-    """Vision describe + save media memory. Returns description or empty."""
     if not config.MEDIA_DESCRIBE_ON_DOWNLOAD:
         return ""
     memory = context.application.bot_data["memory"]
@@ -209,15 +209,12 @@ async def _send_media_with_followup(update, context, local_name: str, uid: int):
     sandbox = context.application.bot_data["sandbox"]
     memory = context.application.bot_data["memory"]
     path = sandbox.path_for(local_name)
-    # describe BEFORE send_local_file deletes the file
     desc = await _describe_and_remember(context, uid, local_name)
     await send_local_file(update, path)
     if config.MEDIA_FOLLOWUP and desc:
         mood = memory.get_mood(uid)
         follow = media_followup_lines(desc, mood)
         await send_long_text(update, follow)
-        # inject into history so chat knows she "sent" it
-        from langchain_core.messages import HumanMessage, AIMessage
         h = memory.get_history(uid)
         h.append(AIMessage(content=f"[maine yeh media bheji: {local_name}]\n{desc}\n\n{follow}"))
         memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
@@ -241,38 +238,38 @@ async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, seria
 
 
 async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generate a voice note of the last bot reply or custom text."""
     if not _allowed(update.effective_user.id):
         return
     uid = update.effective_user.id
     memory = context.application.bot_data["memory"]
     history = memory.get_history(uid)
-    
+
     text = " ".join(context.args) if context.args else ""
     if not text:
-        # Get last AI message
         for msg in reversed(history):
             if isinstance(msg, AIMessage):
                 text = msg.content
                 break
-    
+
     if not text:
         await update.message.reply_text("Pehle kuch baat toh karo, tabhi toh bolungi 😏")
         return
 
     await update.message.reply_text("Ek sec, voice note bhej rahi hoon...")
-    
+
     sandbox = context.application.bot_data["sandbox"]
     filename = f"voice_{uid}.mp3"
     path = sandbox.path_for(filename)
-    
+
     if generate_voice_note(text, path):
-        await update.message.reply_voice(voice=open(path, 'rb'))
-        os.remove(path)
+        try:
+            with open(path, "rb") as f:
+                await update.message.reply_voice(voice=f)
+        finally:
+            path.unlink(missing_ok=True)
     else:
         await update.message.reply_text("Abhi gala kharab hai, baad mein try karna.")
 
-# ───────────── vault handlers ─────────────
 
 async def cmd_vault_setcode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
@@ -283,7 +280,8 @@ async def cmd_vault_setcode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = context.args[0]
     memory = context.application.bot_data["memory"]
     memory.set_vault_code(update.effective_user.id, code)
-    await update.message.reply_text(f"✅ Secret code set ho gaya hai. Ab aap apni private memories vault mein save kar sakte hain. 🤫")
+    await update.message.reply_text("✅ Secret code set ho gaya hai. Ab aap apni private memories vault mein save kar sakte hain. 🤫")
+
 
 async def cmd_vault_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
@@ -291,14 +289,15 @@ async def cmd_vault_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     memory = context.application.bot_data["memory"]
     last_media = memory.get_last_media(uid)
-    
+
     if not last_media:
         await update.message.reply_text("Abhi koi media nahi mili jo main vault mein daal sakun. Pehle kuch bhej toh sahi... 😏")
         return
-    
+
     label = " ".join(context.args) if context.args else "Secret"
     memory.add_vault_entry(uid, last_media["file_key"], last_media["name"], label, last_media["description"])
     await update.message.reply_text(f"🔒 Yeh memory ('{label}') ab hamare secret vault mein safe hai. Sirf hamare liye... 😈")
+
 
 async def cmd_vault_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
@@ -306,26 +305,27 @@ async def cmd_vault_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     memory = context.application.bot_data["memory"]
     saved_code = memory.get_vault_code(uid)
-    
+
     if not saved_code:
         await update.message.reply_text("Pehle /vault_setcode se ek code set karo.")
         return
-    
+
     if not context.args or context.args[0] != saved_code:
         await update.message.reply_text("❌ Galat code! Vault kholne ke liye sahi code chahiye... try again. 😏")
         return
-    
+
     entries = memory.get_vault_entries(uid)
     if not entries:
         await update.message.reply_text("Vault abhi khali hai. Kuch 'khas' add karo na... 😈")
         return
-    
+
     text = "🔒 **Hamari Secret Memories:**\n\n"
     for e in entries:
         text += f"ID: `{e['id']}` | Label: **{e['label']}** | {e['file_name']}\n"
-    
+
     text += "\nKholne ke liye: `/vault_open <id> <code>`"
     await update.message.reply_text(text, parse_mode="Markdown")
+
 
 async def cmd_vault_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
@@ -333,34 +333,39 @@ async def cmd_vault_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
         await update.message.reply_text("Usage: /vault_open <id> <code>")
         return
-    
+
     entry_id = int(context.args[0])
     code = context.args[1]
     uid = update.effective_user.id
     memory = context.application.bot_data["memory"]
-    
+    sandbox = context.application.bot_data["sandbox"]
+
     saved_code = memory.get_vault_code(uid)
     if code != saved_code:
         await update.message.reply_text("❌ Galat code! Tumhe lagta hai main itni asani se dikha dungi? 😏")
         return
-    
+
     entries = memory.get_vault_entries(uid)
     target = next((e for e in entries if e["id"] == entry_id), None)
-    
+
     if not target:
         await update.message.reply_text("Yeh ID toh nahi mili.")
         return
-    
+
     await update.message.reply_text("Ruko, vault se nikal rahi hoon... 🤫")
-    # In this implementation, file_id is stored in file_key field of vault_entries
+    local_path = sandbox.path_for(target["file_id"])
     try:
-        # Check if it's a file_id or local path. 
-        # The existing system uses file_key as local filename for media_memory.
-        # But for vault, we might want to store Telegram file_id.
-        # Let's assume for now it's a file_id if it looks like one.
+        if local_path.exists():
+            with open(local_path, "rb") as f:
+                await update.message.reply_document(document=f, caption=f"Hamari memory: {target['label']}")
+            return
         await update.message.reply_document(document=target["file_id"], caption=f"Hamari memory: {target['label']}")
     except Exception as e:
-        await update.message.reply_text(f"Error: {e}")
+        logger.exception("vault open failed")
+        await update.message.reply_text(
+            f"File ab available nahi hai.\nLabel: {target['label']}\nDesc: {target.get('description') or '—'}"
+        )
+
 
 async def cmd_vault_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
@@ -368,19 +373,20 @@ async def cmd_vault_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
         await update.message.reply_text("Usage: /vault_del <id> <code>")
         return
-    
+
     entry_id = int(context.args[0])
     code = context.args[1]
     uid = update.effective_user.id
     memory = context.application.bot_data["memory"]
-    
+
     saved_code = memory.get_vault_code(uid)
     if code != saved_code:
         await update.message.reply_text("❌ Galat code!")
         return
-    
+
     memory.delete_vault_entry(uid, entry_id)
     await update.message.reply_text(f"✅ Memory ID {entry_id} delete ho gayi. Ab wo sirf hamare dimaag mein rahegi... 😈")
+
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -399,13 +405,58 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     parsed = parse_intent(text)
 
-    # Agentic Override: Most intents are now handled by AI Action Tags.
-    # We only keep DRIVE_DOWNLOAD by serial for manual overrides.
+    # Rule-based intents first (reliable media / list / voice / vault)
     if parsed.intent == Intent.DRIVE_DOWNLOAD and parsed.serial is not None:
         await _do_download(update, context, parsed.serial, subfolder=parsed.subfolder or "root")
         return
 
-    # CHAT — rich context packet (mood, profile, media, session, emotion)
+    if parsed.intent == Intent.DRIVE_RANDOM:
+        if not drive:
+            await update.message.reply_text("Abhi files nahi khol pa rahi.")
+            return
+        sandbox = context.application.bot_data["sandbox"]
+        kind = getattr(parsed, "media_kind", "any") or "any"
+        await update.message.reply_text("ek sec…")
+        status, msg = drive.download_random(
+            uid, parsed.subfolder or "root", sandbox.root, media_kind=kind
+        )
+        if status != "ok":
+            await update.message.reply_text(msg)
+            return
+        await _send_media_with_followup(update, context, msg, uid)
+        return
+
+    if parsed.intent == Intent.DRIVE_LIST:
+        if not drive:
+            await update.message.reply_text("Abhi files nahi khol pa rahi.")
+            return
+        await send_long_text(update, drive.list_files(uid, parsed.subfolder))
+        return
+
+    if parsed.intent == Intent.DRIVE_SEARCH:
+        if not drive:
+            await update.message.reply_text("Abhi files nahi khol pa rahi.")
+            return
+        await send_long_text(update, drive.search(parsed.search_query or text))
+        return
+
+    if parsed.intent == Intent.VOICE:
+        await cmd_voice(update, context)
+        return
+
+    if parsed.intent == Intent.VAULT_ADD:
+        await cmd_vault_add(update, context)
+        return
+
+    if parsed.intent == Intent.VAULT_LIST:
+        await cmd_vault_list(update, context)
+        return
+
+    if parsed.intent == Intent.VAULT_OPEN:
+        await cmd_vault_open(update, context)
+        return
+
+    # CHAT — AI + action tags
     history = memory.get_history(uid)
     ctx = build_context_packet(memory, uid, user_text=text)
     chain = build_chat_agent(
@@ -424,8 +475,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = await chain.ainvoke({"input": text, "chat_history": history})
         if not reply or not str(reply).strip():
             reply = "Hmm... bol na, sun rahi hoon 😏"
-        
-        # Action Tag Processing
+
         do_voice = False
         do_vault_add = None
         do_vault_list = False
@@ -437,16 +487,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "[VOICE]" in reply:
             do_voice = True
             reply = reply.replace("[VOICE]", "").strip()
-        
+
         vault_add_match = re.search(r"\[VAULT_ADD:\s*(.*?)\]", reply)
         if vault_add_match:
             do_vault_add = vault_add_match.group(1)
             reply = re.sub(r"\[VAULT_ADD:.*?\]", "", reply).strip()
-        
+
         if "[VAULT_LIST]" in reply:
             do_vault_list = True
             reply = reply.replace("[VAULT_LIST]", "").strip()
-        
+
         vault_open_match = re.search(r"\[VAULT_OPEN:\s*(\d+)\]", reply)
         if vault_open_match:
             do_vault_open = int(vault_open_match.group(1))
@@ -470,24 +520,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         history.append(HumanMessage(content=text))
         history.append(AIMessage(content=reply))
         memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
-        
+
         if reply:
             await send_long_text(update, reply)
-        
-        # Execute Actions
+
         if do_voice:
             context.args = [reply]
             await cmd_voice(update, context)
-        
+
         if do_vault_add:
             context.args = [do_vault_add]
             await cmd_vault_add(update, context)
-        
+
         if do_vault_list:
             saved_code = memory.get_vault_code(uid)
             context.args = [saved_code] if saved_code else []
             await cmd_vault_list(update, context)
-        
+
         if do_vault_open:
             saved_code = memory.get_vault_code(uid)
             context.args = [str(do_vault_open), saved_code] if saved_code else [str(do_vault_open)]
@@ -508,14 +557,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             profile = memory.get_profile(uid)
             evolutions = profile.get("persona_evolution", [])
             evolutions.append(do_evolve)
-            profile["persona_evolution"] = evolutions[-5:] # Keep last 5
+            profile["persona_evolution"] = evolutions[-5:]
             memory.set_profile(uid, profile)
 
         if should_extract(text):
             try:
                 updated = await extract_and_merge(llm, ctx["profile"] or empty_profile(), text, reply)
                 memory.set_profile(uid, updated)
-                # ongoing fantasy field
                 if updated.get("ongoing_fantasy"):
                     memory.set_fantasy(uid, updated["ongoing_fantasy"])
                 logger.info("profile updated for user %s", uid)
@@ -528,13 +576,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.exception("session summary side-effect failed")
     except Exception as e:
         logger.exception("chat failed")
-        await update.message.reply_text(
-            "Abhi nahi ho paya, thodi der baad try karo."
-        )
+        await update.message.reply_text("Abhi nahi ho paya, thodi der baad try karo.")
 
 
 async def _transcribe_and_reply(update, context, file_bytes: bytes, filename: str, label: str):
-    """Shared path: show status → whisper → save memory → reply (chunked)."""
     memory = context.application.bot_data["memory"]
     groq_key = context.application.bot_data.get("groq_api_key")
     uid = update.effective_user.id
@@ -554,7 +599,6 @@ async def _transcribe_and_reply(update, context, file_bytes: bytes, filename: st
             await status.delete()
         except Exception:
             pass
-        # Natural reply on what was said (no command brochure)
         try:
             llm = context.application.bot_data["llm"]
             tools = context.application.bot_data["tools"]
@@ -620,7 +664,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.exception("video transcript failed")
                 await status.edit_text(f"Video transcript fail:\n{str(e)[:250]}")
         else:
-            # FIX: data already in buf — write directly, no double download
             sandbox.write_bytes(name, data)
             h = memory.get_history(uid)
             h.append(HumanMessage(content=f"[document: {name}]"))
@@ -643,7 +686,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         name = f"photo_{uid}_{photo.file_unique_id}.jpg"
         await f.download_to_drive(str(sandbox.path_for(name)))
         h = memory.get_history(uid)
-        h.append(HumanMessage(content="[photo]"))
+        h.append(HumanMessage(content="[photo]")
+        )
         memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
         await _ask_enhance_mode(update, context, name)
     except Exception:
@@ -652,7 +696,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Telegram voice note (mic button) — usually .ogg"""
     if not _allowed(update.effective_user.id):
         return
     voice = update.message.voice
@@ -669,7 +712,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Music / audio file sent as Telegram audio."""
     if not _allowed(update.effective_user.id):
         return
     audio = update.message.audio
@@ -685,7 +727,6 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Video message (not document)."""
     if not _allowed(update.effective_user.id):
         return
     video = update.message.video
@@ -709,7 +750,6 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Round video note."""
     if not _allowed(update.effective_user.id):
         return
     note = update.message.video_note
@@ -731,8 +771,6 @@ async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Video note fail.")
 
 
-
-# ---- incoming file: ask method (like /mood) ----
 FILE_ACTIONS = [
     ("📝 Transcribe", "fileact_transcribe"),
     ("💾 Save local", "fileact_save"),
@@ -817,17 +855,13 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             context.user_data.pop("pending_file", None)
             await query.edit_message_text("📝 Transcript ready:")
             chat_id = query.message.chat_id
-            chunk = transcript
-            for j in range(0, len(chunk), 4000):
-                await context.bot.send_message(chat_id, chunk[j:j + 4000])
+            for j in range(0, len(transcript), 4000):
+                await context.bot.send_message(chat_id, transcript[j:j + 4000])
         except Exception as e:
             logger.exception("fileact transcribe")
             await query.edit_message_text(f"Fail: {str(e)[:200]}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# IMAGE ENHANCEMENT HANDLERS
-# ─────────────────────────────────────────────────────────────────────────────
 from bot.infra.image_enhance import enhance_image, EnhanceMode
 
 ENHANCE_ACTIONS = [
@@ -870,16 +904,16 @@ async def enhance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     mode_map = {
-        "enhance_regen":   EnhanceMode.REGENERATE,
+        "enhance_regen": EnhanceMode.REGENERATE,
         "enhance_upscale": EnhanceMode.UPSCALE,
-        "enhance_full":    EnhanceMode.FULL,
+        "enhance_full": EnhanceMode.FULL,
     }
     mode = mode_map.get(action, EnhanceMode.FULL)
 
     mode_labels = {
         EnhanceMode.REGENERATE: "🎨 AI Regeneration",
-        EnhanceMode.UPSCALE:    "📐 Free Upscale",
-        EnhanceMode.FULL:       "🔥 Full (FREE)",
+        EnhanceMode.UPSCALE: "📐 Free Upscale",
+        EnhanceMode.FULL: "🔥 Full (FREE)",
     }
     await query.edit_message_text(
         f"{mode_labels[mode]} shuru ho raha hai… ⏳\n_(30–90 seconds lagenge)_",
@@ -924,23 +958,19 @@ async def enhance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/enhance — last photo ko enhance karo"""
     if not _allowed(update.effective_user.id):
         return
     pending = context.user_data.get("enhance_file")
     if not pending:
-        await update.message.reply_text(
-            "Pehle ek photo bhejo, phir /enhance use karo. 📸"
-        )
+        await update.message.reply_text("Pehle ek photo bhejo, phir /enhance use karo. 📸")
         return
     await _ask_enhance_mode(update, context, pending)
 
+
 async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
-    """Send a contextual, AI-generated message to allowed users periodically."""
     memory = context.application.bot_data["memory"]
     llm = context.application.bot_data["llm"]
-    
-    # Get all users with history
+
     conn = memory._conn()
     try:
         with conn.cursor() as cur:
@@ -948,7 +978,7 @@ async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
             uids = [row[0] for row in cur.fetchall()]
     finally:
         memory._put(conn)
-    
+
     if not uids:
         return
 
@@ -956,21 +986,18 @@ async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
     for uid in uids:
         if not _allowed(uid):
             continue
-        
-        # 1 in 5 chance to actually ping to keep it rare and special
         if random.random() > 0.2:
             continue
-            
+
         try:
             ctx = build_context_packet(memory, uid)
             history = memory.get_history(uid)
-            
-            # Ask LLM to generate a proactive ping
+
             from bot.agent.prompts import SYSTEM_PROMPT
             from bot.domain.learning import profile_to_prompt_text
             from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
             from langchain_core.output_parsers import StrOutputParser
-            
+
             prompt = ChatPromptTemplate.from_messages([
                 ("system", SYSTEM_PROMPT.format(
                     current_mood=ctx["mood"],
@@ -985,8 +1012,8 @@ async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
                 ("human", "Say something to me..."),
             ])
             chain = prompt | llm | StrOutputParser()
-            msg = await chain.ainvoke({"chat_history": history[-5:]}) # Last few messages for context
-            
+            msg = await chain.ainvoke({"chat_history": history[-5:]})
+
             if msg:
                 await context.bot.send_message(chat_id=uid, text=msg)
                 logger.info("Sent AI proactive ping to %s", uid)
