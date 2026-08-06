@@ -2,15 +2,17 @@ import json
 import time
 import threading
 import os
+import hashlib
 import psycopg2
 import psycopg2.pool
+import sqlite3
 from langchain_core.messages import HumanMessage, AIMessage
 
 
-def _get_dsn() -> str:
+def _get_dsn() -> str | None:
     dsn = os.getenv("DATABASE_URL", "")
     if not dsn:
-        raise RuntimeError("DATABASE_URL environment variable not set!")
+        return None
     # Render gives 'postgres://' but psycopg2 needs 'postgresql://'
     if dsn.startswith("postgres://"):
         dsn = "postgresql://" + dsn[len("postgres://"):]
@@ -18,28 +20,49 @@ def _get_dsn() -> str:
 
 
 class MemoryStore:
-    """Per-user chat history + mood + profile + session + media + fantasy — Postgres backend."""
+    """Per-user chat history + mood + profile + session + media + fantasy — Postgres or SQLite backend."""
 
-    def __init__(self, db_path: str = None):
-        # db_path ignored (SQLite legacy param), Postgres uses DATABASE_URL
+    def __init__(self, db_path: str = "memory.db"):
         self._lock = threading.Lock()
-        self._pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=1,
-            maxconn=10,
-            dsn=_get_dsn(),
-        )
+        dsn = _get_dsn()
+        if dsn:
+            self._mode = "postgres"
+            self._pool = psycopg2.pool.ThreadedConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=dsn,
+            )
+        else:
+            self._mode = "sqlite"
+            self._db_path = db_path
+            # Ensure path exists
+            os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+            
         self._init_db()
 
     def _conn(self):
-        return self._pool.getconn()
+        if self._mode == "postgres":
+            return self._pool.getconn()
+        else:
+            conn = sqlite3.connect(self._db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
 
     def _put(self, conn):
-        self._pool.putconn(conn)
+        if self._mode == "postgres":
+            self._pool.putconn(conn)
+        else:
+            conn.close()
 
     def _init_db(self):
         conn = self._conn()
         try:
+            # Postgres SERIAL is SQLite AUTOINCREMENT
+            serial_type = "SERIAL" if self._mode == "postgres" else "INTEGER"
+            autoincrement = "" if self._mode == "postgres" else " PRIMARY KEY AUTOINCREMENT"
+            
             with conn.cursor() as cur:
+                # Basic Tables
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS memories (
                         user_id BIGINT PRIMARY KEY,
@@ -73,23 +96,41 @@ class MemoryStore:
                         updated_at DOUBLE PRECISION
                     )
                 """)
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS media_memory (
-                        id SERIAL PRIMARY KEY,
-                        user_id BIGINT NOT NULL,
-                        file_key TEXT NOT NULL,
-                        name TEXT NOT NULL,
-                        type TEXT NOT NULL DEFAULT 'file',
-                        description TEXT NOT NULL DEFAULT '',
-                        tags TEXT NOT NULL DEFAULT '[]',
-                        reaction TEXT NOT NULL DEFAULT '',
-                        created_at DOUBLE PRECISION
-                    )
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_media_user
-                    ON media_memory(user_id, created_at DESC)
-                """)
+                
+                # Media Memory
+                if self._mode == "postgres":
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS media_memory (
+                            id SERIAL PRIMARY KEY,
+                            user_id BIGINT NOT NULL,
+                            file_key TEXT NOT NULL,
+                            file_id TEXT,
+                            name TEXT NOT NULL,
+                            type TEXT NOT NULL DEFAULT 'file',
+                            description TEXT NOT NULL DEFAULT '',
+                            tags TEXT NOT NULL DEFAULT '[]',
+                            reaction TEXT NOT NULL DEFAULT '',
+                            created_at DOUBLE PRECISION
+                        )
+                    """)
+                else:
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS media_memory (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            user_id BIGINT NOT NULL,
+                            file_key TEXT NOT NULL,
+                            file_id TEXT,
+                            name TEXT NOT NULL,
+                            type TEXT NOT NULL DEFAULT 'file',
+                            description TEXT NOT NULL DEFAULT '',
+                            tags TEXT NOT NULL DEFAULT '[]',
+                            reaction TEXT NOT NULL DEFAULT '',
+                            created_at DOUBLE PRECISION
+                        )
+                    """)
+                
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_media_user ON media_memory(user_id, created_at DESC)")
+                
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS active_fantasy (
                         user_id BIGINT PRIMARY KEY,
@@ -111,34 +152,60 @@ class MemoryStore:
                         updated_at DOUBLE PRECISION
                     )
                 """)
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS vault_entries (
-                        id SERIAL PRIMARY KEY,
-                        user_id BIGINT NOT NULL,
-                        file_id TEXT NOT NULL,
-                        file_name TEXT,
-                        label TEXT,
-                        description TEXT,
-                        created_at DOUBLE PRECISION
-                    )
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_vault_user
-                    ON vault_entries(user_id, created_at DESC)
-                """)
+                
+                # Vault Entries
+                if self._mode == "postgres":
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS vault_entries (
+                            id SERIAL PRIMARY KEY,
+                            user_id BIGINT NOT NULL,
+                            file_id TEXT NOT NULL,
+                            file_name TEXT,
+                            label TEXT,
+                            description TEXT,
+                            created_at DOUBLE PRECISION
+                        )
+                    """)
+                else:
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS vault_entries (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            user_id BIGINT NOT NULL,
+                            file_id TEXT NOT NULL,
+                            file_name TEXT,
+                            label TEXT,
+                            description TEXT,
+                            created_at DOUBLE PRECISION
+                        )
+                    """)
+                
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_vault_user ON vault_entries(user_id, created_at DESC)")
+            conn.commit()
+        finally:
+            self._put(conn)
+
+    def _execute(self, query: str, params: tuple = (), fetch: str = "none"):
+        # Helper to handle SQL placeholder differences (%s vs ?)
+        if self._mode == "sqlite":
+            query = query.replace("%s", "?")
+        
+        conn = self._conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                if fetch == "one":
+                    res = cur.fetchone()
+                    return res
+                if fetch == "all":
+                    res = cur.fetchall()
+                    return res
             conn.commit()
         finally:
             self._put(conn)
 
     # ───────────── history ─────────────
     def get_history(self, user_id: int) -> list:
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT history FROM memories WHERE user_id = %s", (user_id,))
-                row = cur.fetchone()
-        finally:
-            self._put(conn)
+        row = self._execute("SELECT history FROM memories WHERE user_id = %s", (user_id,), fetch="one")
         if not row:
             return []
         messages = []
@@ -157,58 +224,36 @@ class MemoryStore:
                 raw.append({"type": "human", "content": m.content})
             elif isinstance(m, AIMessage):
                 raw.append({"type": "ai", "content": m.content})
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO memories (user_id, history) VALUES (%s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET history = EXCLUDED.history
-                """, (user_id, json.dumps(raw, ensure_ascii=False)))
-            conn.commit()
-        finally:
-            self._put(conn)
+        
+        query = """
+            INSERT INTO memories (user_id, history) VALUES (%s, %s)
+        """
+        if self._mode == "postgres":
+            query += " ON CONFLICT (user_id) DO UPDATE SET history = EXCLUDED.history"
+        else:
+            query = "INSERT OR REPLACE INTO memories (user_id, history) VALUES (?, ?)"
+            
+        self._execute(query, (user_id, json.dumps(raw, ensure_ascii=False)))
 
     def clear_history(self, user_id: int):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM memories WHERE user_id = %s", (user_id,))
-            conn.commit()
-        finally:
-            self._put(conn)
+        self._execute("DELETE FROM memories WHERE user_id = %s", (user_id,))
 
     # ───────────── mood ─────────────
     def get_mood(self, user_id: int) -> str:
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT mood FROM moods WHERE user_id = %s", (user_id,))
-                row = cur.fetchone()
-        finally:
-            self._put(conn)
+        row = self._execute("SELECT mood FROM moods WHERE user_id = %s", (user_id,), fetch="one")
         return row[0] if row else "Horny / Flirty"
 
     def set_mood(self, user_id: int, mood: str):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO moods (user_id, mood) VALUES (%s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET mood = EXCLUDED.mood
-                """, (user_id, mood))
-            conn.commit()
-        finally:
-            self._put(conn)
+        query = "INSERT INTO moods (user_id, mood) VALUES (%s, %s)"
+        if self._mode == "postgres":
+            query += " ON CONFLICT (user_id) DO UPDATE SET mood = EXCLUDED.mood"
+        else:
+            query = "INSERT OR REPLACE INTO moods (user_id, mood) VALUES (?, ?)"
+        self._execute(query, (user_id, mood))
 
     # ───────────── profile ─────────────
     def get_profile(self, user_id: int) -> dict:
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT profile FROM profiles WHERE user_id = %s", (user_id,))
-                row = cur.fetchone()
-        finally:
-            self._put(conn)
+        row = self._execute("SELECT profile FROM profiles WHERE user_id = %s", (user_id,), fetch="one")
         if not row or not row[0]:
             return {}
         try:
@@ -217,57 +262,30 @@ class MemoryStore:
             return {}
 
     def set_profile(self, user_id: int, profile: dict):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO profiles (user_id, profile) VALUES (%s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET profile = EXCLUDED.profile
-                """, (user_id, json.dumps(profile or {}, ensure_ascii=False)))
-            conn.commit()
-        finally:
-            self._put(conn)
+        query = "INSERT INTO profiles (user_id, profile) VALUES (%s, %s)"
+        if self._mode == "postgres":
+            query += " ON CONFLICT (user_id) DO UPDATE SET profile = EXCLUDED.profile"
+        else:
+            query = "INSERT OR REPLACE INTO profiles (user_id, profile) VALUES (?, ?)"
+        self._execute(query, (user_id, json.dumps(profile or {}, ensure_ascii=False)))
 
     def clear_profile(self, user_id: int):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM profiles WHERE user_id = %s", (user_id,))
-            conn.commit()
-        finally:
-            self._put(conn)
+        self._execute("DELETE FROM profiles WHERE user_id = %s", (user_id,))
 
     # ───────────── session summary ─────────────
     def get_session(self, user_id: int) -> tuple[str, int]:
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT summary, msg_count FROM session_summaries WHERE user_id = %s",
-                    (user_id,)
-                )
-                row = cur.fetchone()
-        finally:
-            self._put(conn)
+        row = self._execute("SELECT summary, msg_count FROM session_summaries WHERE user_id = %s", (user_id,), fetch="one")
         if not row:
             return "", 0
         return row[0] or "", int(row[1] or 0)
 
     def set_session(self, user_id: int, summary: str, msg_count: int):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO session_summaries (user_id, summary, msg_count, updated_at)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET
-                        summary = EXCLUDED.summary,
-                        msg_count = EXCLUDED.msg_count,
-                        updated_at = EXCLUDED.updated_at
-                """, (user_id, summary or "", msg_count, time.time()))
-            conn.commit()
-        finally:
-            self._put(conn)
+        query = "INSERT INTO session_summaries (user_id, summary, msg_count, updated_at) VALUES (%s, %s, %s, %s)"
+        if self._mode == "postgres":
+            query += " ON CONFLICT (user_id) DO UPDATE SET summary = EXCLUDED.summary, msg_count = EXCLUDED.msg_count, updated_at = EXCLUDED.updated_at"
+        else:
+            query = "INSERT OR REPLACE INTO session_summaries (user_id, summary, msg_count, updated_at) VALUES (?, ?, ?, ?)"
+        self._execute(query, (user_id, summary or "", msg_count, time.time()))
 
     def bump_session_count(self, user_id: int) -> int:
         summary, count = self.get_session(user_id)
@@ -277,172 +295,117 @@ class MemoryStore:
 
     # ───────────── emotion ─────────────
     def get_emotion(self, user_id: int) -> str:
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT label FROM emotion_state WHERE user_id = %s", (user_id,))
-                row = cur.fetchone()
-        finally:
-            self._put(conn)
+        row = self._execute("SELECT label FROM emotion_state WHERE user_id = %s", (user_id,), fetch="one")
         return row[0] if row else "neutral"
 
     def set_emotion(self, user_id: int, label: str):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO emotion_state (user_id, label, updated_at) VALUES (%s, %s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET
-                        label = EXCLUDED.label,
-                        updated_at = EXCLUDED.updated_at
-                """, (user_id, label or "neutral", time.time()))
-            conn.commit()
-        finally:
-            self._put(conn)
+        query = "INSERT INTO emotion_state (user_id, label, updated_at) VALUES (%s, %s, %s)"
+        if self._mode == "postgres":
+            query += " ON CONFLICT (user_id) DO UPDATE SET label = EXCLUDED.label, updated_at = EXCLUDED.updated_at"
+        else:
+            query = "INSERT OR REPLACE INTO emotion_state (user_id, label, updated_at) VALUES (?, ?, ?)"
+        self._execute(query, (user_id, label or "neutral", time.time()))
 
     # ───────────── media memory ─────────────
     def add_media(self, user_id: int, file_key: str, name: str,
-                  type_: str, description: str, tags: list | None = None) -> None:
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO media_memory
-                    (user_id, file_key, name, type, description, tags, reaction, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, '', %s)
-                """, (
-                    user_id, file_key, name, type_, description or "",
-                    json.dumps(tags or [], ensure_ascii=False), time.time(),
-                ))
-            conn.commit()
-        finally:
-            self._put(conn)
+                  type_: str, description: str, tags: list | None = None, file_id: str | None = None) -> None:
+        query = """
+            INSERT INTO media_memory (user_id, file_key, file_id, name, type, description, tags, reaction, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, '', %s)
+        """
+        self._execute(query, (user_id, file_key, file_id, name, type_, description or "", json.dumps(tags or [], ensure_ascii=False), time.time()))
 
     def get_last_media(self, user_id: int) -> dict | None:
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT file_key, name, type, description, tags, reaction, created_at
-                    FROM media_memory WHERE user_id = %s
-                    ORDER BY created_at DESC LIMIT 1
-                """, (user_id,))
-                row = cur.fetchone()
-        finally:
-            self._put(conn)
+        row = self._execute("""
+            SELECT file_key, file_id, name, type, description, tags, reaction, created_at
+            FROM media_memory WHERE user_id = %s
+            ORDER BY created_at DESC LIMIT 1
+        """, (user_id,), fetch="one")
         if not row:
             return None
         return {
-            "file_key": row[0], "name": row[1], "type": row[2],
-            "description": row[3], "tags": json.loads(row[4] or "[]"),
-            "reaction": row[5], "created_at": row[6],
+            "file_key": row[0], "file_id": row[1], "name": row[2], "type": row[3],
+            "description": row[4], "tags": json.loads(row[5] or "[]"),
+            "reaction": row[6], "created_at": row[7],
         }
 
     def set_last_media_reaction(self, user_id: int, reaction: str) -> None:
         last = self.get_last_media(user_id)
         if not last:
             return
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE media_memory SET reaction = %s
-                    WHERE user_id = %s AND file_key = %s AND created_at = %s
-                """, (reaction[:200], user_id, last["file_key"], last["created_at"]))
-            conn.commit()
-        finally:
-            self._put(conn)
+        self._execute("UPDATE media_memory SET reaction = %s WHERE user_id = %s AND file_key = %s AND created_at = %s", 
+                     (reaction[:200], user_id, last["file_key"], last["created_at"]))
 
     # ───────────── active fantasy ─────────────
     def get_fantasy(self, user_id: int) -> str:
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT text FROM active_fantasy WHERE user_id = %s", (user_id,))
-                row = cur.fetchone()
-        finally:
-            self._put(conn)
+        row = self._execute("SELECT text FROM active_fantasy WHERE user_id = %s", (user_id,), fetch="one")
         return row[0] if row else ""
 
     def set_fantasy(self, user_id: int, text: str):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO active_fantasy (user_id, text, updated_at) VALUES (%s, %s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET
-                        text = EXCLUDED.text,
-                        updated_at = EXCLUDED.updated_at
-                """, (user_id, text or "", time.time()))
-            conn.commit()
-        finally:
-            self._put(conn)
+        query = "INSERT INTO active_fantasy (user_id, text, updated_at) VALUES (%s, %s, %s)"
+        if self._mode == "postgres":
+            query += " ON CONFLICT (user_id) DO UPDATE SET text = EXCLUDED.text, updated_at = EXCLUDED.updated_at"
+        else:
+            query = "INSERT OR REPLACE INTO active_fantasy (user_id, text, updated_at) VALUES (?, ?, ?)"
+        self._execute(query, (user_id, text or "", time.time()))
 
-    def clear_fantasy(self, user_id: int):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM active_fantasy WHERE user_id = %s", (user_id,))
-            conn.commit()
-        finally:
-            self._put(conn)
+    # ───────────── serial maps ─────────────
+    def get_serial_map(self, user_id: int) -> dict:
+        row = self._execute("SELECT entries FROM serial_maps WHERE user_id = %s", (user_id,), fetch="one")
+        if not row:
+            return {}
+        return json.loads(row[0])
+
+    def set_serial_map(self, user_id: int, entries: dict):
+        query = "INSERT INTO serial_maps (user_id, entries, created_at) VALUES (%s, %s, %s)"
+        if self._mode == "postgres":
+            query += " ON CONFLICT (user_id) DO UPDATE SET entries = EXCLUDED.entries, created_at = EXCLUDED.created_at"
+        else:
+            query = "INSERT OR REPLACE INTO serial_maps (user_id, entries, created_at) VALUES (?, ?, ?)"
+        self._execute(query, (user_id, json.dumps(entries), time.time()))
 
     # ───────────── vault ─────────────
-    def set_vault_code(self, user_id: int, code: str):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO vault_codes (user_id, code, updated_at) VALUES (%s, %s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET code = EXCLUDED.code, updated_at = EXCLUDED.updated_at
-                """, (user_id, str(code), time.time()))
-            conn.commit()
-        finally:
-            self._put(conn)
+    def _hash_code(self, code: str) -> str:
+        return hashlib.sha256(code.encode()).hexdigest()
 
     def get_vault_code(self, user_id: int) -> str | None:
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT code FROM vault_codes WHERE user_id = %s", (user_id,))
-                row = cur.fetchone()
-        finally:
-            self._put(conn)
+        row = self._execute("SELECT code FROM vault_codes WHERE user_id = %s", (user_id,), fetch="one")
         return row[0] if row else None
 
-    def add_vault_entry(self, user_id: int, file_id: str, file_name: str = None, label: str = None, description: str = None):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO vault_entries (user_id, file_id, file_name, label, description, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (user_id, file_id, file_name, label, description, time.time()))
-            conn.commit()
-        finally:
-            self._put(conn)
+    def verify_vault_code(self, user_id: int, code: str) -> bool:
+        saved = self.get_vault_code(user_id)
+        if not saved:
+            return False
+        return saved == self._hash_code(code)
 
-    def get_vault_entries(self, user_id: int) -> list[dict]:
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT id, file_id, file_name, label, description, created_at
-                    FROM vault_entries WHERE user_id = %s ORDER BY created_at DESC
-                """, (user_id,))
-                rows = cur.fetchall()
-        finally:
-            self._put(conn)
-        return [
-            {"id": r[0], "file_id": r[1], "file_name": r[2], "label": r[3], "description": r[4], "created_at": r[5]}
-            for r in rows
-        ]
+    def set_vault_code(self, user_id: int, code: str):
+        hashed = self._hash_code(code)
+        query = "INSERT INTO vault_codes (user_id, code, updated_at) VALUES (%s, %s, %s)"
+        if self._mode == "postgres":
+            query += " ON CONFLICT (user_id) DO UPDATE SET code = EXCLUDED.code, updated_at = EXCLUDED.updated_at"
+        else:
+            query = "INSERT OR REPLACE INTO vault_codes (user_id, code, updated_at) VALUES (?, ?, ?)"
+        self._execute(query, (user_id, hashed, time.time()))
+
+    def add_vault_entry(self, user_id: int, file_id: str, file_name: str, label: str, description: str = ""):
+        query = """
+            INSERT INTO vault_entries (user_id, file_id, file_name, label, description, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        self._execute(query, (user_id, file_id, file_name, label, description, time.time()))
+
+    def get_vault_entries(self, user_id: int) -> list:
+        rows = self._execute("""
+            SELECT id, file_id, file_name, label, description, created_at
+            FROM vault_entries WHERE user_id = %s ORDER BY created_at DESC
+        """, (user_id,), fetch="all")
+        return [dict(r) for r in rows]
 
     def delete_vault_entry(self, user_id: int, entry_id: int):
-        conn = self._conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM vault_entries WHERE user_id = %s AND id = %s", (user_id, entry_id))
-            conn.commit()
-        finally:
-            self._put(conn)
+        self._execute("DELETE FROM vault_entries WHERE user_id = %s AND id = %s", (user_id, entry_id))
+
+    # ───────────── admin/proactive ─────────────
+    def get_all_user_ids(self) -> list[int]:
+        """Public method to get all users for proactive pings."""
+        rows = self._execute("SELECT DISTINCT user_id FROM memories", fetch="all")
+        return [row[0] for row in rows]

@@ -33,24 +33,25 @@ async def send_local_file(update: Update, path: Path):
     is_photo = low.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"))
     is_audio = low.endswith((".mp3", ".ogg", ".m4a", ".wav", ".aac"))
 
+    msg = None
     try:
         with open(path, "rb") as f:
             if is_video:
-                await update.message.reply_video(
+                msg = await update.message.reply_video(
                     video=f, filename=name, supports_streaming=True,
                     read_timeout=120, write_timeout=120, connect_timeout=60,
                 )
             elif is_photo:
-                await update.message.reply_photo(
+                msg = await update.message.reply_photo(
                     photo=f, read_timeout=90, write_timeout=90, connect_timeout=30,
                 )
             elif is_audio:
-                await update.message.reply_audio(
+                msg = await update.message.reply_audio(
                     audio=f, filename=name,
                     read_timeout=90, write_timeout=90, connect_timeout=30,
                 )
             else:
-                await update.message.reply_document(
+                msg = await update.message.reply_document(
                     document=f, filename=name,
                     read_timeout=120, write_timeout=120, connect_timeout=60,
                 )
@@ -59,3 +60,4 @@ async def send_local_file(update: Update, path: Path):
         await update.message.reply_text("Abhi bhej nahi paayi, thodi der baad try karo.")
     finally:
         path.unlink(missing_ok=True)
+    return msg
