@@ -1,4 +1,4 @@
-"""Thin intent helpers — list only when user clearly asks to list."""
+"""Rule-based intent router — LLM se pehle."""
 import re
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -27,6 +27,12 @@ class ParsedIntent:
 
 SUBFOLDERS = ("insta", "picture", "pdf", "audio", "other", "tosspage", "map")
 
+DRIVE_KEYWORDS = (
+    "drive", "folder", "map", "list", "files",
+    "insta", "picture", "pdf", "audio", "other", "tosspage",
+    "download", "random",
+)
+
 
 def _detect_media_kind(low: str) -> str:
     wants_video = bool(re.search(r"\b(video|videos|clip|clips|reel|reels)\b", low))
@@ -54,7 +60,7 @@ def parse_intent(text: str) -> ParsedIntent:
     if not low:
         return ParsedIntent(Intent.CHAT)
 
-    # Bare serial: "2"
+    # Bare serial: "2" / "12"
     if re.fullmatch(r"\d{1,3}", low):
         return ParsedIntent(Intent.DRIVE_DOWNLOAD, serial=int(low))
 
@@ -70,18 +76,79 @@ def parse_intent(text: str) -> ParsedIntent:
             subfolder=_detect_subfolder(low),
             serial=serial,
         )
+    m2 = re.search(r"download\s+(\d+)", low)
+    if m2:
+        return ParsedIntent(
+            Intent.DRIVE_DOWNLOAD,
+            subfolder=_detect_subfolder(low),
+            serial=int(m2.group(1)),
+        )
 
-    # Hardcoded intent matching is now minimal. 
-    # AI handles most of these via Action Tags in handle_text.
-    
-    # Search only if clearly search
+    # Random: "insta se random" / "koi bhi file"
+    if "random" in low or re.search(r"\bkoi\s*(bhi|bi)\b", low):
+        if any(k in low for k in DRIVE_KEYWORDS) or any(f in low for f in SUBFOLDERS):
+            return ParsedIntent(
+                Intent.DRIVE_RANDOM,
+                subfolder=_detect_subfolder(low),
+                media_kind=_detect_media_kind(low),
+            )
+
+    # Natural "photo bhej" / "video bhej" / "pic dikhao"
+    if re.search(
+        r"\b(photo|photos|pic|pics|image|images|selfie|nudes?|video|videos|clip)s?\b",
+        low,
+    ) and re.search(
+        r"\b(bhej|bhejo|bhejdo|bhej\s*do|send|dikha|dikhao|show|share|de\s*do|do)\b",
+        low,
+    ):
+        return ParsedIntent(
+            Intent.DRIVE_RANDOM,
+            subfolder=_detect_subfolder(low),
+            media_kind=_detect_media_kind(low),
+        )
+
+    if re.search(r"\b(photo|pic|pics|selfie|nude|nudes|video)\s*(bhej|bhejo|bhejdo|send)\b", low):
+        return ParsedIntent(
+            Intent.DRIVE_RANDOM,
+            subfolder=_detect_subfolder(low),
+            media_kind=_detect_media_kind(low),
+        )
+
+    # Voice
+    voice_markers = (
+        "bol kar sunao", "bol ke sunao", "bol ke batao", "voice note",
+        "audio bhej", "audio sunao", "suna do", "sunaao", "bol do",
+    )
+    if any(m in low for m in voice_markers) or re.search(
+        r"\b(voice|audio|suna)\b.*\b(bhej|do|sunao)\b", low
+    ):
+        return ParsedIntent(Intent.VOICE)
+
+    # Vault
+    vault_markers = ("vault", "secret", "tijori", "khufiya", "khufia", "safe")
+    if any(m in low for m in vault_markers):
+        if any(x in low for x in ("dikha", "bata", "list", "kya hai", "kya kya")):
+            return ParsedIntent(Intent.VAULT_LIST)
+        if any(x in low for x in ("save", "daal", "rakh", "add", "store")):
+            return ParsedIntent(Intent.VAULT_ADD)
+        if any(x in low for x in ("khol", "open", "nikal")):
+            return ParsedIntent(Intent.VAULT_OPEN)
+
+    # Search
     if low.startswith("/search") or low.startswith("search "):
         q = re.sub(r"^/?search\s*", "", raw, flags=re.I).strip()
         return ParsedIntent(Intent.DRIVE_SEARCH, search_query=q)
 
-    # LIST only when user clearly wants a list
-    list_markers = ("list", "folder list", "files list")
-    if any(m in low for m in list_markers):
+    # List — only clear list asks
+    list_markers = (
+        "list", "lists", "folder list", "files list",
+        "dikhao folder", "folder dikhao", "map dikhao", "folder dikha",
+    )
+    if any(m in low for m in list_markers) or re.search(
+        r"\b(folder|map|drive)\b.*\b(dikha|dikhao|bata|batao|list)\b", low
+    ) or re.search(
+        r"\b(dikha|dikhao|bata|batao|list)\b.*\b(folder|map|drive|files)\b", low
+    ):
         return ParsedIntent(Intent.DRIVE_LIST, subfolder=_detect_subfolder(low))
 
     return ParsedIntent(Intent.CHAT)
