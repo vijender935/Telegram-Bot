@@ -18,6 +18,7 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "dislikes": [],
     "ongoing_fantasy": None,
     "notes": [],
+    "persona_evolution": [],
 }
 
 REMEMBER_PATTERNS = (

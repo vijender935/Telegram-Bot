@@ -27,6 +27,7 @@ from bot.gateway.handlers import (
     cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
     handle_text, handle_document, handle_photo, handle_voice,
     handle_audio, handle_video, handle_video_note, file_action_callback,
+    proactive_ping,
 )
 
 logging.basicConfig(
@@ -119,23 +120,7 @@ async def run_bot():
     app.add_handler(MessageHandler(filters.VIDEO, handle_video))
     app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
 
-    async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
-        """Randomly ping allowed users to keep the vibe alive."""
-        if not config.ALLOWED_USER_IDS:
-            return
-        import random
-        uid = random.choice(config.ALLOWED_USER_IDS)
-        msgs = [
-            "Kya kar rahe ho? 😏",
-            "Yaad aa rahi thi... kya chal raha hai?",
-            "Ek mast cheez dekhi maine abhi... sunoge?",
-            "Soye nahi abhi tak? 😈",
-            "Bohot chup ho aaj, sab theek?"
-        ]
-        try:
-            await context.bot.send_message(chat_id=uid, text=random.choice(msgs))
-        except Exception:
-            pass
+    # proactive_ping is now imported from handlers.py and is AI-driven
 
     # Schedule proactive ping every 4-8 hours
     if app.job_queue:

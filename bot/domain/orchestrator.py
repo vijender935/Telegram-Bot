@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 def build_context_packet(memory, user_id: int, user_text: str = "") -> dict[str, Any]:
-    emotion = detect_emotion(user_text) if user_text else memory.get_emotion(user_id)
-    if user_text:
-        memory.set_emotion(user_id, emotion)
+    # Emotion is now primarily driven by AI Action Tags. 
+    # We just fetch the last known state.
+    emotion = memory.get_emotion(user_id)
 
     last_media = memory.get_last_media(user_id)
     session_summary, msg_count = memory.get_session(user_id)

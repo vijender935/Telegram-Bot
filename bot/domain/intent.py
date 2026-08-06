@@ -71,72 +71,17 @@ def parse_intent(text: str) -> ParsedIntent:
             serial=serial,
         )
 
-    # Natural send media request
-    if re.search(
-        r"\b(photo|photos|pic|pics|image|images|selfie|nudes?|video|videos|clip)s?\b",
-        low,
-    ) and re.search(
-        r"\b(bhej|bhejo|bhejdo|bhej\s*do|send|dikha|dikhao|show|share|de\s*do|do)\b",
-        low,
-    ):
-        return ParsedIntent(
-            Intent.DRIVE_RANDOM,
-            subfolder=_detect_subfolder(low),
-            media_kind=_detect_media_kind(low),
-        )
-
-    if re.search(r"\b(photo|pic|pics|selfie|nude|nudes|video)\s*(bhej|bhejo|bhejdo|send)\b", low):
-        return ParsedIntent(
-            Intent.DRIVE_RANDOM,
-            subfolder=_detect_subfolder(low),
-            media_kind=_detect_media_kind(low),
-        )
-
-    # Voice intent
-    voice_markers = (
-        "bol kar sunao", "bol ke sunao", "bol ke batao", "voice note", 
-        "audio bhej", "audio sunao", "suna do", "sunaao", "bol do"
-    )
-    if any(m in low for m in voice_markers) or re.search(r"\b(voice|audio|suna)\b.*\b(bhej|do|sunao)\b", low):
-        return ParsedIntent(Intent.VOICE)
-
-    # Vault intents
-    vault_markers = ("vault", "secret", "tijori", "khufiya", "khufia", "safe")
+    # Hardcoded intent matching is now minimal. 
+    # AI handles most of these via Action Tags in handle_text.
     
-    # Vault List
-    if any(m in low for m in vault_markers) and any(x in low for x in ("dikha", "bata", "list", "kya hai", "kya kya")):
-        return ParsedIntent(Intent.VAULT_LIST)
-    
-    # Vault Add
-    if any(m in low for m in vault_markers) and any(x in low for x in ("save", "daal", "rakh", "add", "store", "bhej")):
-        return ParsedIntent(Intent.VAULT_ADD)
-    
-    # Vault Open
-    if any(m in low for m in vault_markers) and any(x in low for x in ("khol", "open", "nikal")):
-        return ParsedIntent(Intent.VAULT_OPEN)
-
-    # Random file
-    if "random" in low or re.search(r"\bkoi\s*(bhi|bi)\b", low):
-        if any(f in low for f in SUBFOLDERS) or "folder" in low or "map" in low or "drive" in low:
-            return ParsedIntent(
-                Intent.DRIVE_RANDOM,
-                subfolder=_detect_subfolder(low),
-                media_kind=_detect_media_kind(low),
-            )
-
     # Search only if clearly search
     if low.startswith("/search") or low.startswith("search "):
         q = re.sub(r"^/?search\s*", "", raw, flags=re.I).strip()
         return ParsedIntent(Intent.DRIVE_SEARCH, search_query=q)
 
     # LIST only when user clearly wants a list
-    list_markers = (
-        "list", "lists", "folder list", "files list", "kya hai", "kya kya",
-        "dikhao folder", "folder dikhao", "map dikhao", "folder dikha",
-    )
-    if any(m in low for m in list_markers) or re.search(
-        r"\b(folder|map|drive)\b.*\b(dikha|dikhao|bata|batao|list)\b", low
-    ) or re.search(r"\b(dikha|dikhao|bata|batao|list)\b.*\b(folder|map|drive|files)\b", low):
+    list_markers = ("list", "folder list", "files list")
+    if any(m in low for m in list_markers):
         return ParsedIntent(Intent.DRIVE_LIST, subfolder=_detect_subfolder(low))
 
     return ParsedIntent(Intent.CHAT)

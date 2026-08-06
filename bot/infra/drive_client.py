@@ -261,8 +261,10 @@ class DriveClient:
     def search(self, query: str) -> str:
         if not query.strip():
             return "Search query empty."
+        # Use semantic search keywords
+        q = f"name contains '{query.strip()}' and trashed=false"
         res = self._service.files().list(
-            q=f"name contains '{query.strip()}' and trashed=false",
+            q=q,
             pageSize=30,
             fields="files(name,mimeType)",
             supportsAllDrives=True,
@@ -275,6 +277,28 @@ class DriveClient:
         for f in files:
             lines.append(f"• {f['name']}  [{self.mime_label(f.get('mimeType', ''))}]")
         return "\n".join(lines)
+
+    def semantic_download(self, user_id: int, description: str, dest_dir: Path) -> tuple[str, str]:
+        """Search for a file matching description and download it."""
+        import random
+        q = f"name contains '{description.strip()}' and trashed=false"
+        try:
+            res = self._service.files().list(
+                q=q, pageSize=10, fields="files(id,name,mimeType)",
+                supportsAllDrives=True, includeItemsFromAllDrives=True,
+            ).execute()
+            files = res.get("files", [])
+            if not files:
+                # Fallback to random if search fails
+                return self.download_random(user_id, "root", dest_dir)
+            
+            entry = random.choice(files)
+            dest = dest_dir / Path(entry['name']).name
+            self.download_to_path(entry['id'], dest, entry['mimeType'])
+            return "ok", dest.name
+        except Exception as e:
+            logger.exception("semantic download failed")
+            return "error", str(e)
 
     def upload(self, local_path: Path, drive_name: str | None = None) -> str:
         name = drive_name or local_path.name
