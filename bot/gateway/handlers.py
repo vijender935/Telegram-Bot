@@ -399,57 +399,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     parsed = parse_intent(text)
 
+    # Agentic Override: Most intents are now handled by AI Action Tags.
+    # We only keep DRIVE_DOWNLOAD by serial for manual overrides.
     if parsed.intent == Intent.DRIVE_DOWNLOAD and parsed.serial is not None:
         await _do_download(update, context, parsed.serial, subfolder=parsed.subfolder or "root")
-        return
-
-    if parsed.intent == Intent.DRIVE_RANDOM:
-        if not drive:
-            await update.message.reply_text("Abhi files nahi khol pa rahi.")
-            return
-        sandbox = context.application.bot_data["sandbox"]
-        kind = getattr(parsed, "media_kind", "any") or "any"
-        label = {"image": "photo", "video": "video"}.get(kind, "file")
-        await update.message.reply_text("ek sec…")
-        status, msg = drive.download_random(
-            uid, parsed.subfolder or "root", sandbox.root, media_kind=kind
-        )
-        if status != "ok":
-            await update.message.reply_text(msg)
-            return
-        await _send_media_with_followup(update, context, msg, uid)
-        return
-
-    if parsed.intent == Intent.DRIVE_LIST:
-        if not drive:
-            await update.message.reply_text("Abhi files nahi khol pa rahi.")
-            return
-        await send_long_text(update, drive.list_files(uid, parsed.subfolder))
-        return
-
-    if parsed.intent == Intent.DRIVE_SEARCH:
-        if not drive:
-            await update.message.reply_text("Abhi files nahi khol pa rahi.")
-            return
-        await send_long_text(update, drive.search(parsed.search_query or text))
-        return
-
-    if parsed.intent == Intent.VOICE:
-        await cmd_voice(update, context)
-        return
-
-    if parsed.intent == Intent.VAULT_ADD:
-        await cmd_vault_add(update, context)
-        return
-
-    if parsed.intent == Intent.VAULT_LIST:
-        # For natural language, we need to handle the code. 
-        # If not provided, we ask or check if a session code exists.
-        await cmd_vault_list(update, context)
-        return
-
-    if parsed.intent == Intent.VAULT_OPEN:
-        await cmd_vault_open(update, context)
         return
 
     # CHAT — rich context packet (mood, profile, media, session, emotion)
@@ -477,6 +430,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         do_vault_add = None
         do_vault_list = False
         do_vault_open = None
+        do_send_media = None
+        do_set_emotion = None
+        do_evolve = None
 
         if "[VOICE]" in reply:
             do_voice = True
@@ -496,6 +452,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             do_vault_open = int(vault_open_match.group(1))
             reply = re.sub(r"\[VAULT_OPEN:.*?\]", "", reply).strip()
 
+        media_match = re.search(r"\[SEND_MEDIA:\s*(.*?)\]", reply)
+        if media_match:
+            do_send_media = media_match.group(1)
+            reply = re.sub(r"\[SEND_MEDIA:.*?\]", "", reply).strip()
+
+        emotion_match = re.search(r"\[SET_EMOTION:\s*(.*?)\]", reply)
+        if emotion_match:
+            do_set_emotion = emotion_match.group(1).lower()
+            reply = re.sub(r"\[SET_EMOTION:.*?\]", "", reply).strip()
+
+        evolve_match = re.search(r"\[EVOLVE:\s*(.*?)\]", reply)
+        if evolve_match:
+            do_evolve = evolve_match.group(1)
+            reply = re.sub(r"\[EVOLVE:.*?\]", "", reply).strip()
+
         history.append(HumanMessage(content=text))
         history.append(AIMessage(content=reply))
         memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
@@ -513,7 +484,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await cmd_vault_add(update, context)
         
         if do_vault_list:
-            # We still need the code for security, but the AI triggered the list
             saved_code = memory.get_vault_code(uid)
             context.args = [saved_code] if saved_code else []
             await cmd_vault_list(update, context)
@@ -522,6 +492,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             saved_code = memory.get_vault_code(uid)
             context.args = [str(do_vault_open), saved_code] if saved_code else [str(do_vault_open)]
             await cmd_vault_open(update, context)
+
+        if do_send_media and drive:
+            sandbox = context.application.bot_data["sandbox"]
+            status, msg = drive.semantic_download(uid, do_send_media, sandbox.root)
+            if status == "ok":
+                await _send_media_with_followup(update, context, msg, uid)
+            else:
+                logger.warning("Semantic media download failed: %s", msg)
+
+        if do_set_emotion:
+            memory.set_emotion(uid, do_set_emotion)
+
+        if do_evolve:
+            profile = memory.get_profile(uid)
+            evolutions = profile.get("persona_evolution", [])
+            evolutions.append(do_evolve)
+            profile["persona_evolution"] = evolutions[-5:] # Keep last 5
+            memory.set_profile(uid, profile)
 
         if should_extract(text):
             try:
@@ -946,3 +934,61 @@ async def cmd_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     await _ask_enhance_mode(update, context, pending)
+
+async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
+    """Send a contextual, AI-generated message to allowed users periodically."""
+    memory = context.application.bot_data["memory"]
+    llm = context.application.bot_data["llm"]
+    
+    # Get all users with history
+    conn = memory._conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM memories")
+            uids = [row[0] for row in cur.fetchall()]
+    finally:
+        memory._put(conn)
+    
+    if not uids:
+        return
+
+    import random
+    for uid in uids:
+        if not _allowed(uid):
+            continue
+        
+        # 1 in 5 chance to actually ping to keep it rare and special
+        if random.random() > 0.2:
+            continue
+            
+        try:
+            ctx = build_context_packet(memory, uid)
+            history = memory.get_history(uid)
+            
+            # Ask LLM to generate a proactive ping
+            from bot.agent.prompts import SYSTEM_PROMPT
+            from bot.domain.learning import profile_to_prompt_text
+            from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+            from langchain_core.output_parsers import StrOutputParser
+            
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", SYSTEM_PROMPT.format(
+                    current_mood=ctx["mood"],
+                    user_profile=profile_to_prompt_text(ctx["profile"]),
+                    session_summary=ctx["session_summary_text"],
+                    last_media=ctx["last_media_text"],
+                    active_fantasy=ctx["fantasy_text"],
+                    emotion=ctx["emotion"],
+                    time_context=ctx["time_context"],
+                ) + "\n\n## Task\nGenerate a short, addictive, and very personal proactive message to start a conversation. Use the current mood and profile. Don't use any tags."),
+                MessagesPlaceholder("chat_history"),
+                ("human", "Say something to me..."),
+            ])
+            chain = prompt | llm | StrOutputParser()
+            msg = await chain.ainvoke({"chat_history": history[-5:]}) # Last few messages for context
+            
+            if msg:
+                await context.bot.send_message(chat_id=uid, text=msg)
+                logger.info("Sent AI proactive ping to %s", uid)
+        except Exception:
+            logger.exception("AI Proactive ping failed for %s", uid)

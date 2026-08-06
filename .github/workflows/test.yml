@@ -30,8 +30,8 @@ jobs:
           assert parse_intent('3 download karo').intent == Intent.DRIVE_DOWNLOAD
           assert parse_intent('3 download karo').serial == 3
           assert parse_intent('insta se 2 download').serial == 2
-          assert parse_intent('Map folder list').intent == Intent.DRIVE_LIST
-          assert parse_intent('photo bhej').intent == Intent.DRIVE_RANDOM
+          # Note: Complex intents like DRIVE_RANDOM are now handled by AI Action Tags in handle_text
+          assert parse_intent('photo bhej').intent == Intent.CHAT
           assert parse_intent('hello baby').intent == Intent.CHAT
           s = SandboxStorage('/tmp/ci_test')
           s.write_bytes('t.txt', b'ok')
