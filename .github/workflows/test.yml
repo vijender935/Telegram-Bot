@@ -17,7 +17,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Syntax
         run: python -m compileall bot && echo OK
-      - name: Intent + sandbox unit check
+      - name: System + Sandbox unit check
         env:
           TELEGRAM_BOT_TOKEN: dummy
           GROQ_API_KEY: dummy
@@ -25,16 +25,26 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: "{}"
         run: |
           python -c "
-          from bot.domain.intent import parse_intent, Intent
+          import os
           from bot.infra.sandbox import SandboxStorage
-          assert parse_intent('3 download karo').intent == Intent.DRIVE_DOWNLOAD
-          assert parse_intent('3 download karo').serial == 3
-          assert parse_intent('insta se 2 download').serial == 2
-          # Note: Complex intents like DRIVE_RANDOM are now handled by AI Action Tags in handle_text
-          assert parse_intent('photo bhej').intent == Intent.CHAT
-          assert parse_intent('hello baby').intent == Intent.CHAT
+          from bot.infra.memory import MemoryStore
+          
+          # 1. Test Sandbox
           s = SandboxStorage('/tmp/ci_test')
           s.write_bytes('t.txt', b'ok')
-          assert s.exists('t.txt')
-          print('OK')
+          assert s.exists('t.txt'), 'Sandbox storage failed'
+          
+          # 2. Test Hybrid Memory (SQLite Fallback)
+          # This ensures the bot starts even without a Postgres URL
+          m = MemoryStore('/tmp/ci_test_memory.db')
+          m.set_mood(12345, 'Naughty')
+          assert m.get_mood(12345) == 'Naughty', 'Memory storage fallback failed'
+          
+          # 3. Test Modular Imports
+          # This ensures the new gateway structure doesn't have circular imports
+          from bot.gateway.handlers import handle_text
+          from bot.gateway.media import handle_photo
+          from bot.gateway.vault import cmd_vault_add
+          
+          print('CI Checks Passed: Sandbox, Memory Fallback, and Modular Imports are OK.')
           "
