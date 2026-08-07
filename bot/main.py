@@ -19,16 +19,19 @@ from bot.infra.memory import MemoryStore
 from bot.infra.serial_map import SerialMapStore
 from bot.infra.drive_client import DriveClient
 from bot.agent.tools import build_tools
-from bot.gateway.handlers import (
-    enhance_callback, cmd_enhance,
-    cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_mood, mood_callback,
-    cmd_voice,
-    cmd_vault_setcode, cmd_vault_add, cmd_vault_list, cmd_vault_open, cmd_vault_del,
-    cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
-    handle_text, handle_document, handle_photo, handle_voice,
-    handle_audio, handle_video, handle_video_note, file_action_callback,
-    proactive_ping,
+from bot.gateway.handlers import handle_text
+from bot.gateway.commands import (
+    cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_mood, mood_callback
 )
+from bot.gateway.media import (
+    cmd_voice, cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
+    handle_photo, handle_document, handle_voice, handle_audio, handle_video, handle_video_note,
+    file_action_callback, enhance_callback, cmd_enhance
+)
+from bot.gateway.vault import (
+    cmd_vault_setcode, cmd_vault_add, cmd_vault_list, cmd_vault_open, cmd_vault_del
+)
+from bot.gateway.scheduler import proactive_ping
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
