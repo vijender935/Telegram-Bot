@@ -267,6 +267,19 @@ class MemoryStore:
     def clear_profile(self, user_id: int):
         self._execute("DELETE FROM profiles WHERE user_id = %s", (user_id,))
 
+    def clear_all_for_user(self, user_id: int):
+        """Full personal reset — history, profile, mood, emotion, session, fantasy, media memory."""
+        tables = [
+            "memories", "profiles", "moods", "emotion_state",
+            "session_summaries", "active_fantasy", "media_memory",
+            "serial_maps",
+        ]
+        for table in tables:
+            try:
+                self._execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
+            except Exception:
+                pass
+
     def get_session(self, user_id: int) -> tuple[str, int]:
         row = self._execute("SELECT summary, msg_count FROM session_summaries WHERE user_id = %s", (user_id,), fetch="one")
         if not row:
