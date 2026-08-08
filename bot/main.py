@@ -21,7 +21,7 @@ from bot.infra.drive_client import DriveClient
 from bot.agent.tools import build_tools
 from bot.gateway.handlers import handle_text
 from bot.gateway.commands import (
-    cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_mood, mood_callback
+    cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_fullreset, cmd_mood, mood_callback
 )
 from bot.gateway.media import (
     cmd_voice, cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
@@ -63,7 +63,6 @@ async def run_bot():
     serial_store = SerialMapStore(
         ttl_seconds=config.SERIAL_MAP_TTL_SECONDS,
     )
-    # FIX: Drive credentials missing/wrong hone pe bot crash na kare
     try:
         drive = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
         logger.info("DriveClient initialized OK")
@@ -80,16 +79,14 @@ async def run_bot():
     app = (
         Application.builder()
         .token(config.TELEGRAM_TOKEN)
-        .read_timeout(60)
-        .write_timeout(60)
-        .connect_timeout(30)
-        .pool_timeout(30)
+        .concurrent_updates(True)
         .build()
     )
 
-    app.bot_data["drive"] = drive
     app.bot_data["sandbox"] = sandbox
     app.bot_data["memory"] = memory
+    app.bot_data["serial_store"] = serial_store
+    app.bot_data["drive"] = drive
     app.bot_data["llm"] = llm
     app.bot_data["tools"] = tools
     app.bot_data["groq_api_key"] = config.GROQ_API_KEY
@@ -98,6 +95,7 @@ async def run_bot():
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("profile", cmd_profile))
     app.add_handler(CommandHandler("forgetprofile", cmd_forgetprofile))
+    app.add_handler(CommandHandler("fullreset", cmd_fullreset))
     app.add_handler(CommandHandler("mood", cmd_mood))
     app.add_handler(CommandHandler("voice", cmd_voice))
     app.add_handler(CommandHandler("vault_setcode", cmd_vault_setcode))
@@ -123,9 +121,6 @@ async def run_bot():
     app.add_handler(MessageHandler(filters.VIDEO, handle_video))
     app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
 
-    # proactive_ping is now imported from handlers.py and is AI-driven
-
-    # Schedule proactive ping every 4-8 hours
     if app.job_queue:
         app.job_queue.run_repeating(proactive_ping, interval=3600 * 6, first=3600)
 
