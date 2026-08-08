@@ -49,6 +49,13 @@ async def cmd_forgetprofile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     memory.clear_profile(update.effective_user.id)
     await update.message.reply_text("Profile bhool gayi. Naye sir se seekhungi 🔥")
 
+async def cmd_fullreset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    memory = context.application.bot_data["memory"]
+    memory.clear_all_for_user(update.effective_user.id)
+    await update.message.reply_text("Sab kuch saaf 🔥 History + Profile + Mood + Memory reset. Naye sir se shuru.")
+
 async def cmd_mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         return
