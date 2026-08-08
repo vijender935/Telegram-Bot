@@ -120,8 +120,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.exception(f"Action {tag} failed")
 
         # 6. Learning & Summary (Background)
-        if should_extract(user_text, clean_reply):
-            new_info = await extract_and_merge(llm, user_text, clean_reply, ctx["profile"])
+        if should_extract(user_text):
+            new_info = await extract_and_merge(llm, ctx["profile"], user_text, clean_reply)
             memory.set_profile(uid, new_info)
 
         await maybe_update_session_summary(llm, memory, uid, user_text, clean_reply)
