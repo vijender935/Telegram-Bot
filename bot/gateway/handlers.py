@@ -78,12 +78,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if tag == "VOICE":
                     context.args = [clean_reply] if clean_reply else []
                     await cmd_voice(update, context)
+
                 elif tag == "VAULT_ADD":
                     context.args = [val] if val else []
                     await cmd_vault_add(update, context)
-                elif tag == "DRIVE_GET":
+
+                elif tag == "VAULT_LIST":
+                    await cmd_vault_list(update, context)
+
+                elif tag == "VAULT_OPEN":
+                    context.args = [val] if val else []
+                    await cmd_vault_open(update, context)
+
+                elif tag in ("SEND_MEDIA", "DRIVE_GET"):
                     drive = context.application.bot_data.get("drive")
-                    if drive:
+                    if drive and val:
                         await update.message.reply_text("Ruko, dhundh rahi hoon... 👁️")
                         status, msg = drive.download_semantic(uid, val, config.SANDBOX_PATH)
                         if status == "ok":
@@ -91,6 +100,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await _send_media_with_followup(update, context, msg, uid)
                         else:
                             await update.message.reply_text(msg)
+
+                elif tag == "SET_EMOTION":
+                    if val:
+                        emotion_val = val.strip().lower()
+                        memory.set_emotion(uid, emotion_val)
+                        logger.info("Emotion set to %s for user %s", emotion_val, uid)
+
+                elif tag == "EVOLVE":
+                    if val:
+                        profile = memory.get_profile(uid) or {}
+                        evolutions = profile.get("persona_evolution", [])
+                        evolutions.append(val.strip())
+                        profile["persona_evolution"] = evolutions[-8:]  # keep last 8
+                        memory.set_profile(uid, profile)
+                        logger.info("Personality evolved: %s", val)
+
             except Exception:
                 logger.exception(f"Action {tag} failed")
 
@@ -98,8 +123,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if should_extract(user_text, clean_reply):
             new_info = await extract_and_merge(llm, user_text, clean_reply, ctx["profile"])
             memory.set_profile(uid, new_info)
-            
-        maybe_update_session_summary(memory, llm, uid)
+
+        await maybe_update_session_summary(llm, memory, uid, user_text, clean_reply)
 
     except Exception:
         logger.exception("Chat failed")
