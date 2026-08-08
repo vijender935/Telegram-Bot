@@ -78,7 +78,7 @@ class MemoryStore:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS moods (
                         user_id BIGINT PRIMARY KEY,
-                        mood TEXT NOT NULL DEFAULT 'Horny / Flirty'
+                        mood TEXT NOT NULL DEFAULT 'Strapon / Pegging'
                     )
                 """)
                 cur.execute("""
@@ -133,7 +133,6 @@ class MemoryStore:
                         )
                     """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_media_user ON media_memory(user_id, created_at DESC)")
-                # Migrate existing media_memory (CREATE IF NOT EXISTS does not add new columns)
                 self._ensure_column(cur, "media_memory", "file_id", "TEXT")
                 self._ensure_column(cur, "media_memory", "tags", "TEXT DEFAULT '[]'")
                 self._ensure_column(cur, "media_memory", "reaction", "TEXT DEFAULT ''")
@@ -238,7 +237,7 @@ class MemoryStore:
 
     def get_mood(self, user_id: int) -> str:
         row = self._execute("SELECT mood FROM moods WHERE user_id = %s", (user_id,), fetch="one")
-        return row[0] if row else "Horny / Flirty"
+        return row[0] if row else "Strapon / Pegging"
 
     def set_mood(self, user_id: int, mood: str):
         query = "INSERT INTO moods (user_id, mood) VALUES (%s, %s)"

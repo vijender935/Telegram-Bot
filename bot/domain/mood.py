@@ -10,4 +10,4 @@ MOODS = [
 ]
 
 MOOD_MAP = {data: text for text, data in MOODS}
-DEFAULT_MOOD = "Horny / Flirty"
+DEFAULT_MOOD = "Strapon / Pegging"
