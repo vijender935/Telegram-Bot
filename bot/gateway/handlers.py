@@ -54,7 +54,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clean_reply = full_reply
         actions = []
         
-        # Regex to find tags like [VOICE], [VAULT_ADD], [DRIVE_GET: query]
         tag_pattern = r"\[([A-Z_]+)(?::\s*([^\]]+))?\]"
         matches = list(re.finditer(tag_pattern, full_reply))
         
@@ -112,7 +111,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         profile = memory.get_profile(uid) or {}
                         evolutions = profile.get("persona_evolution", [])
                         evolutions.append(val.strip())
-                        profile["persona_evolution"] = evolutions[-8:]  # keep last 8
+                        profile["persona_evolution"] = evolutions[-8:]
                         memory.set_profile(uid, profile)
                         logger.info("Personality evolved: %s", val)
 
@@ -120,8 +119,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.exception(f"Action {tag} failed")
 
         # 6. Learning & Summary (Background)
-        if should_extract(user_text, clean_reply):
-            new_info = await extract_and_merge(llm, user_text, clean_reply, ctx["profile"])
+        if should_extract(user_text):
+            new_info = await extract_and_merge(llm, ctx["profile"], user_text, clean_reply)
             memory.set_profile(uid, new_info)
 
         await maybe_update_session_summary(llm, memory, uid, user_text, clean_reply)
