@@ -51,7 +51,6 @@ class MemoryStore:
             conn.close()
 
     def _ensure_column(self, cur, table: str, column: str, col_type: str) -> None:
-        """Add column if missing — fixes old Postgres/SQLite schemas after code upgrades."""
         try:
             if self._mode == "postgres":
                 cur.execute(
@@ -422,6 +421,5 @@ class MemoryStore:
         self._execute("DELETE FROM vault_entries WHERE user_id = %s AND id = %s", (user_id, entry_id))
 
     def get_all_user_ids(self) -> list[int]:
-        """Public method to get all users for proactive pings."""
         rows = self._execute("SELECT DISTINCT user_id FROM memories", fetch="all")
         return [row[0] for row in rows] if rows else []

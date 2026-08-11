@@ -63,7 +63,6 @@ async def run_bot():
     serial_store = SerialMapStore(
         ttl_seconds=config.SERIAL_MAP_TTL_SECONDS,
     )
-    # FIX: Drive credentials missing/wrong hone pe bot crash na kare
     try:
         drive = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
         logger.info("DriveClient initialized OK")
@@ -122,9 +121,6 @@ async def run_bot():
     app.add_handler(MessageHandler(filters.VIDEO, handle_video))
     app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
 
-    # proactive_ping is now imported from handlers.py and is AI-driven
-
-    # Schedule proactive ping every 4-8 hours
     if app.job_queue:
         app.job_queue.run_repeating(proactive_ping, interval=3600 * 6, first=3600)
 

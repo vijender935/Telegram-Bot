@@ -54,7 +54,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clean_reply = full_reply
         actions = []
         
-        # Regex to find tags like [VOICE], [VAULT_ADD], [DRIVE_GET: query]
         tag_pattern = r"\[([A-Z_]+)(?::\s*([^\]]+))?\]"
         matches = list(re.finditer(tag_pattern, full_reply))
         
@@ -112,7 +111,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         profile = memory.get_profile(uid) or {}
                         evolutions = profile.get("persona_evolution", [])
                         evolutions.append(val.strip())
-                        profile["persona_evolution"] = evolutions[-8:]  # keep last 8
+                        profile["persona_evolution"] = evolutions[-8:]
                         memory.set_profile(uid, profile)
                         logger.info("Personality evolved: %s", val)
 
