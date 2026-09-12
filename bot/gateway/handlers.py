@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from collections import defaultdict
 
 from telegram import Update
@@ -24,6 +25,23 @@ from bot.gateway.vault import *
 logger = logging.getLogger(__name__)
 _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+_IMAGE_REQUEST_RE = re.compile(
+    r"\b(?:show|send|display|fetch|find|get|give|search|dikhao|dikha|bhejo|bhej|dhoondo|dhundho|lao|la|chahiye|do)\b.*"
+    r"\b(?:image|images|photo|photos|pic|pics|picture|pictures|tasveer|tasveer?e|photo+|image+|wallpaper)\b|"
+    r"\b(?:image|images|photo|photos|pic|pics|picture|pictures|tasveer|wallpaper)\b.*"
+    r"\b(?:show|send|display|fetch|find|get|give|search|dikhao|dikha|bhejo|bhej|dhoondo|dhundho|lao|la|chahiye|do)\b",
+    re.IGNORECASE,
+)
+_LINK_REQUEST_RE = re.compile(
+    r"\b(?:link|url|https?://|preview|shareable|share\s+link)\b",
+    re.IGNORECASE,
+)
+
+
+def _wants_rag_image_media(text: str) -> bool:
+    """Return True for image-display requests, but not explicit link requests."""
+    return bool(_IMAGE_REQUEST_RE.search(text)) and not bool(_LINK_REQUEST_RE.search(text))
+
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not update.message or not _allowed(update.effective_user.id):
@@ -43,6 +61,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     llm = context.application.bot_data["llm"]
     drive = context.application.bot_data.get("drive")
     rag_tools = context.application.bot_data.get("rag_tools", [])
+    rag_mcp = context.application.bot_data.get("rag_mcp")
 
     ctx = build_context_packet(memory, uid, user_text=user_text)
     history = memory.get_history(uid)
@@ -94,6 +113,14 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
         full_reply = getattr(response, "content", None) or str(response)
         clean_reply, actions = parse_action_tags(full_reply)
         clean_reply = clean_reply.strip()
+
+        # Deterministic media guard: for an image-display request, the bot must
+        # send the indexed image instead of merely returning a Drive URL. The
+        # LLM can still use get_image_link when the user explicitly asks for a link.
+        if _wants_rag_image_media(user_text) and rag_mcp and rag_mcp.available:
+            if not any(tag == "RAG_SEND_MEDIA" for tag, _ in actions):
+                actions.append(("RAG_SEND_MEDIA", user_text))
+                logger.info("forced RAG media action for image request user=%s", uid)
     except BotError:
         logger.exception("conversation generation failed user=%s", uid)
         await update.message.reply_text("Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo.")
