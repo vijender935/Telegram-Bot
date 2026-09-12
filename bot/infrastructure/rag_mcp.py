@@ -46,17 +46,16 @@ class RAGMCPClient:
         if not self.configured:
             return []
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        self.client = MultiServerMCPClient(
-            {
-                "rag": {
-                    "transport": "streamable_http",
-                    "url": self.url,
-                    "headers": headers,
-                }
-            },
-            handle_tool_errors=True,
-        )
         try:
+            self.client = MultiServerMCPClient(
+                {
+                    "rag": {
+                        "transport": "streamable_http",
+                        "url": self.url,
+                        "headers": headers,
+                    }
+                }
+            )
             tools = await asyncio.wait_for(self.client.get_tools(), timeout=self.timeout)
         except Exception as exc:
             self.available = False
