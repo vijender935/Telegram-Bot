@@ -1,4 +1,4 @@
-"""User preference learning — profile grows from chat (not model fine-tune)."""
+"""User preference learning — profile grows from chat instead of model fine-tuning."""
 from __future__ import annotations
 
 import json
@@ -30,6 +30,10 @@ REMEMBER_PATTERNS = (
     r"\bmeri\s+fantasy\b",
     r"\bmera\s+naam\b",
     r"\bcall\s+me\b",
+    r"\bprefer\b",
+    r"\bpasand\s+hai\b",
+    r"\breply\s+(?:short|long|medium|detail|detailed)\b",
+    r"\bdetail\s+mein\s+(?:samjha|bata)\b",
 )
 
 
@@ -39,7 +43,7 @@ def empty_profile() -> dict[str, Any]:
 
 def profile_to_prompt_text(profile: dict | None) -> str:
     if not profile:
-        return "(abhi kuch special yaad nahi — naye partner ki tarah jaan rahi hoon)"
+        return "(abhi koi stable user preference recorded nahi hai)"
     lines = []
     if profile.get("name"):
         lines.append(f"- Name / call: {profile['name']}")
@@ -47,18 +51,14 @@ def profile_to_prompt_text(profile: dict | None) -> str:
         lines.append(f"- Language: {profile['language']}")
     if profile.get("reply_style"):
         lines.append(f"- Reply style: {profile['reply_style']}")
-    if profile.get("kinks"):
-        lines.append(f"- Kinks: {', '.join(profile['kinks'][:8])}")
-    if profile.get("soft_limits"):
-        lines.append(f"- Soft limits: {', '.join(profile['soft_limits'][:6])}")
     if profile.get("likes"):
         lines.append(f"- Likes: {', '.join(profile['likes'][:8])}")
     if profile.get("dislikes"):
         lines.append(f"- Dislikes: {', '.join(profile['dislikes'][:6])}")
-    if profile.get("ongoing_fantasy"):
-        lines.append(f"- Ongoing fantasy: {profile['ongoing_fantasy']}")
     if profile.get("notes"):
         lines.append(f"- Notes: {'; '.join(profile['notes'][:6])}")
+    if profile.get("persona_evolution"):
+        lines.append(f"- Learned style: {'; '.join(profile['persona_evolution'][:6])}")
     return "\n".join(lines) if lines else "(profile almost empty)"
 
 
@@ -66,9 +66,11 @@ def should_extract(user_text: str) -> bool:
     low = (user_text or "").lower()
     if any(re.search(p, low) for p in REMEMBER_PATTERNS):
         return True
-    # longer personal messages worth mining occasionally
     return len(low) > 80 and any(
-        w in low for w in ("pasand", "fantasy", "yaad", "like", "hate", "naam", "call me")
+        w in low for w in (
+            "pasand", "prefer", "yaad", "like", "love", "hate", "naam", "call me",
+            "reply", "samjhao", "explain", "detail mein",
+        )
     )
 
 
@@ -81,7 +83,7 @@ def merge_profiles(old: dict, new: dict) -> dict:
         if val:
             out[key] = val
 
-    for key in ("kinks", "soft_limits", "likes", "dislikes", "notes"):
+    for key in ("kinks", "soft_limits", "likes", "dislikes", "notes", "persona_evolution"):
         seen = []
         for item in (out.get(key) or []) + (new.get(key) or []):
             s = str(item).strip()
@@ -92,7 +94,7 @@ def merge_profiles(old: dict, new: dict) -> dict:
 
 
 async def extract_and_merge(llm, existing: dict, user_message: str, bot_reply: str) -> dict:
-    """One cheap LLM call to update profile. Failures = no change."""
+    """One bounded LLM call to update stable user preferences; failure means no profile change."""
     from bot.agent.prompts import PROFILE_EXTRACT_PROMPT
 
     prompt = PROFILE_EXTRACT_PROMPT.format(
