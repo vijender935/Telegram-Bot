@@ -1,12 +1,13 @@
-"""Lightweight semantic index.
+"""Lightweight persistent semantic index.
 
-Uses sentence-transformers when installed and degrades to token overlap otherwise.
-The index stores vectors in SQLite so it works with the existing single-worker deployment.
+Set `SEMANTIC_EMBEDDINGS=true` to enable sentence-transformers. The fallback token scorer
+keeps startup deterministic when model downloads are disabled.
 """
 from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 class SemanticIndex:
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self.enabled = os.getenv("SEMANTIC_EMBEDDINGS", "false").lower() in {"1", "true", "yes"}
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(db_path) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS semantic_index (key TEXT PRIMARY KEY, text TEXT NOT NULL, vector TEXT)")
@@ -24,6 +26,8 @@ class SemanticIndex:
         return {x for x in re.findall(r"[\w-]+", (text or "").lower()) if len(x) > 1}
 
     def _embed(self, text: str):
+        if not self.enabled:
+            return None
         try:
             from sentence_transformers import SentenceTransformer
             if not hasattr(self, "_model"):
@@ -46,9 +50,10 @@ class SemanticIndex:
                 if not raw:
                     return 0.0
                 v = json.loads(raw)
-                return sum(a*b for a,b in zip(qv,v)) / max(1e-9, math.sqrt(sum(a*a for a in qv))*math.sqrt(sum(b*b for b in v)))
-            ranked = [(k,t,cosine(v)) for k,t,v in rows]
+                denom = max(1e-9, math.sqrt(sum(a*a for a in qv)) * math.sqrt(sum(b*b for b in v)))
+                return sum(a*b for a,b in zip(qv, v)) / denom
+            ranked = [(k, t, cosine(v)) for k, t, v in rows]
         else:
             qt = self._tokens(query)
-            ranked = [(k,t,len(qt & self._tokens(t)) / max(1, len(qt))) for k,t,_ in rows]
+            ranked = [(k, t, len(qt & self._tokens(t)) / max(1, len(qt))) for k, t, _ in rows]
         return sorted(ranked, key=lambda x: x[2], reverse=True)[:limit]
