@@ -1,5 +1,7 @@
+import asyncio
 import logging
-import re
+from collections import defaultdict
+
 from telegram import Update
 from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage
@@ -10,32 +12,41 @@ from bot.gateway.formatters import send_long_text
 from bot.domain.orchestrator import build_context_packet, maybe_update_session_summary
 from bot.domain.learning import should_extract, extract_and_merge
 from bot.agent.chat_agent import build_chat_agent
+from bot.agent.action_registry import parse_action_tags
+from bot.core.exceptions import BotError
 
-# Import other handlers
 from bot.gateway.commands import *
 from bot.gateway.media import *
 from bot.gateway.vault import *
-from bot.gateway.scheduler import proactive_ping
 
 logger = logging.getLogger(__name__)
+_USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
+    if not update.effective_user or not update.message or not _allowed(update.effective_user.id):
         return
-    
     uid = update.effective_user.id
-    user_text = update.message.text
+    limiter = context.application.bot_data.get("rate_limiter")
+    if limiter and not limiter.allow(f"chat:{uid}"):
+        await update.message.reply_text("⏳ Thoda slow — ek minute mein bahut zyada requests aa gayi hain.")
+        return
+
+    async with _USER_LOCKS[uid]:
+        await _handle_text_locked(update, context, uid)
+
+
+async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE, uid: int):
+    user_text = update.message.text or ""
     memory = context.application.bot_data["memory"]
     llm = context.application.bot_data["llm"]
     tools = context.application.bot_data["tools"]
 
-    # 1. Context & History
     ctx = build_context_packet(memory, uid, user_text=user_text)
     history = memory.get_history(uid)
     history.append(HumanMessage(content=user_text))
     memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
 
-    # 2. Agent Invoke
     try:
         chain = build_chat_agent(
             llm, tools,
@@ -47,84 +58,56 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             emotion=ctx["emotion"],
             time_context=ctx["time_context"],
         )
-        
         full_reply = await chain.ainvoke({"input": user_text, "chat_history": history[:-1]})
-        
-        # 3. Action Tag Processing
-        clean_reply = full_reply
-        actions = []
-        
-        tag_pattern = r"\[([A-Z_]+)(?::\s*([^\]]+))?\]"
-        matches = list(re.finditer(tag_pattern, full_reply))
-        
-        for match in matches:
-            tag = match.group(1)
-            val = match.group(2)
-            actions.append((tag, val))
-            clean_reply = clean_reply.replace(match.group(0), "")
-            
-        clean_reply = clean_reply.strip()
-        
-        # 4. Save & Reply
+        clean_reply, actions = parse_action_tags(full_reply)
+
         if clean_reply:
             history.append(AIMessage(content=clean_reply))
             memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
             await send_long_text(update, clean_reply)
-        
-        # 5. Execute Actions
+
         for tag, val in actions:
             try:
                 if tag == "VOICE":
                     context.args = [clean_reply] if clean_reply else []
                     await cmd_voice(update, context)
-
                 elif tag == "VAULT_ADD":
                     context.args = [val] if val else []
                     await cmd_vault_add(update, context)
-
                 elif tag == "VAULT_LIST":
                     await cmd_vault_list(update, context)
-
                 elif tag == "VAULT_OPEN":
                     context.args = [val] if val else []
                     await cmd_vault_open(update, context)
-
                 elif tag in ("SEND_MEDIA", "DRIVE_GET"):
                     drive = context.application.bot_data.get("drive")
                     if drive and val:
-                        await update.message.reply_text("Ruko, dhundh rahi hoon... 👁️")
+                        await update.message.reply_text("🔎 Search kar rahi hoon…")
                         status, msg = drive.semantic_download(uid, val, config.SANDBOX_PATH)
                         if status == "ok":
                             from bot.gateway.media import _send_media_with_followup
                             await _send_media_with_followup(update, context, msg, uid)
                         else:
                             await update.message.reply_text(msg)
-
-                elif tag == "SET_EMOTION":
-                    if val:
-                        emotion_val = val.strip().lower()
-                        memory.set_emotion(uid, emotion_val)
-                        logger.info("Emotion set to %s for user %s", emotion_val, uid)
-
-                elif tag == "EVOLVE":
-                    if val:
-                        profile = memory.get_profile(uid) or {}
-                        evolutions = profile.get("persona_evolution", [])
-                        evolutions.append(val.strip())
-                        profile["persona_evolution"] = evolutions[-8:]
-                        memory.set_profile(uid, profile)
-                        logger.info("Personality evolved: %s", val)
-
+                elif tag == "SET_EMOTION" and val:
+                    memory.set_emotion(uid, val.lower()[:40])
+                elif tag == "EVOLVE" and val:
+                    profile = memory.get_profile(uid) or {}
+                    evolutions = profile.get("persona_evolution", [])
+                    evolutions.append(val[:300])
+                    profile["persona_evolution"] = evolutions[-8:]
+                    memory.set_profile(uid, profile)
             except Exception:
-                logger.exception(f"Action {tag} failed")
+                logger.exception("action failed tag=%s", tag)
 
-        # 6. Learning & Summary (Background)
         if should_extract(user_text):
             new_info = await extract_and_merge(llm, ctx["profile"], user_text, clean_reply)
             memory.set_profile(uid, new_info)
-
         await maybe_update_session_summary(llm, memory, uid, user_text, clean_reply)
 
+    except BotError:
+        logger.exception("expected bot error")
+        await update.message.reply_text("Request complete nahi ho paayi. Thodi der baad try karo.")
     except Exception:
-        logger.exception("Chat failed")
-        await update.message.reply_text("Abhi dimaag kaam nahi kar raha, thodi der mein baat karte hain? 😈")
+        logger.exception("chat failed")
+        await update.message.reply_text("Abhi AI service busy hai. Thodi der mein dobara try karo.")
