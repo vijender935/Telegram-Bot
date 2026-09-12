@@ -26,7 +26,7 @@ ffmpeg-python>=0.2.0
 huggingface_hub>=0.23.0
 
 # ── Database ──
-psycopg2-binary>=2.9.0
+# SQLite is built into Python; no external DB driver is required.
 
 # ── Enhancements ──
 gTTS
