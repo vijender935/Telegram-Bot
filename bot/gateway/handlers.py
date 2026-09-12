@@ -75,7 +75,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                     result = tool.invoke(call.get("args", {}))
                     tool_messages.append(ToolMessage(content=str(result)[:4000], tool_call_id=call.get("id", "unknown")))
                 except Exception as exc:
-                    # The model gets a bounded failure signal; the full exception remains in logs.
                     logger.exception("tool execution failed name=%s user=%s", call.get("name"), uid)
                     tool_messages.append(
                         ToolMessage(
@@ -85,7 +84,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                     )
             response = await chain.ainvoke({
                 "input": user_text,
-                "chat_history": history + [HumanMessage(content=user_text), response] + tool_messages,
+                "chat_history": history + [response] + tool_messages,
             })
 
         full_reply = getattr(response, "content", None) or str(response)
@@ -97,8 +96,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo.")
         return
     except Exception:
-        # This boundary is only for the actual conversation-generation pipeline.
-        # Post-processing failures below must never turn a successful answer into a fake AI failure.
         logger.exception("conversation generation failed user=%s", uid)
         await update.message.reply_text("AI response generate nahi ho paaya. Thodi der mein dobara try karo.")
         return
