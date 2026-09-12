@@ -13,6 +13,7 @@ from bot.infra.media_describe import describe_media_path, is_image, is_video
 from bot.infra.tts import generate_voice_note
 from bot.domain.orchestrator import build_context_packet, media_followup_lines
 from bot.agent.chat_agent import build_chat_agent
+from bot.agent.tools import build_tools
 from bot.infra.image_enhance import enhance_image, EnhanceMode
 
 logger = logging.getLogger(__name__)
@@ -409,6 +410,11 @@ async def _describe_and_remember(context, uid: int, local_name: str, file_id: st
         logger.exception("media describe failed")
         return ""
 
+async def _send_media_with_followup(update: Update, context: ContextTypes.DEFAULT_TYPE, filename: str, uid: int):
+    sandbox = context.application.bot_data["sandbox"]
+    path = sandbox.path_for(filename)
+    await send_local_file(update, path)
+
 async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, serial: int, subfolder: str = "root"):
     drive = _get_drive(context)
     if not drive:
@@ -420,7 +426,7 @@ async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, seria
     if status != "ok":
         await update.message.reply_text(msg)
         return
-    await send_local_file(update, sandbox.path_for(msg))
+    await _send_media_with_followup(update, context, msg, update.effective_user.id)
 
 async def _transcribe_and_reply(update, context, file_bytes, filename, label):
     memory = context.application.bot_data["memory"]
@@ -438,7 +444,8 @@ async def _transcribe_and_reply(update, context, file_bytes, filename, label):
         except Exception:
             pass
         llm = context.application.bot_data["llm"]
-        tools = context.application.bot_data["tools"]
+        drive = context.application.bot_data.get("drive")
+        tools = build_tools(memory=memory, drive=drive, user_id=uid, sandbox_path=config.SANDBOX_PATH)
         ctx = build_context_packet(memory, uid, user_text=preview)
         chain = build_chat_agent(
             llm, tools,
