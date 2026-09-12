@@ -46,6 +46,12 @@ class SemanticIndex:
                 (key, text, json.dumps(vector) if vector else None),
             )
 
+    def delete_prefix(self, prefix: str) -> None:
+        if not prefix:
+            return
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM semantic_index WHERE key LIKE ?", (prefix + "%",))
+
     def search(self, query: str, limit: int = 10, prefix: str | None = None) -> list[tuple[str, str, float]]:
         query = (query or "").strip()
         if not query:
