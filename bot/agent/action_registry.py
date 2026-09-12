@@ -5,7 +5,8 @@ New code should prefer ToolCall/ToolRegistry; tags remain supported for backward
 from __future__ import annotations
 
 ALLOWED_ACTIONS = {
-    "VOICE", "VAULT_ADD", "VAULT_LIST", "VAULT_OPEN", "SEND_MEDIA", "DRIVE_GET", "SET_EMOTION", "EVOLVE"
+    "VOICE", "VAULT_ADD", "VAULT_LIST", "VAULT_OPEN", "SEND_MEDIA", "DRIVE_GET",
+    "RAG_SEND_MEDIA", "SET_EMOTION", "EVOLVE",
 }
 
 
