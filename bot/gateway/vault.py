@@ -2,6 +2,7 @@ import logging
 import time
 from telegram import Update
 from telegram.ext import ContextTypes
+from bot import config
 from bot.gateway.base import _allowed
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,7 @@ async def _authenticate(update: Update, context: ContextTypes.DEFAULT_TYPE, code
     if memory.verify_vault_code(uid, code):
         if guard:
             guard.success(uid)
-        context.user_data["vault_unlocked_until"] = time.time() + 900
-        # Remove the command containing the secret when Telegram permits it.
+        context.user_data["vault_unlocked_until"] = time.time() + config.VAULT_SESSION_SECONDS
         try:
             await update.message.delete()
         except Exception:
@@ -61,7 +61,7 @@ async def cmd_vault_setcode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.delete()
     except Exception:
         pass
-    await update.message.reply_text("✅ Vault code set. Secret command message bhi remove kar diya gaya (agar Telegram permissions allow karein).")
+    await update.message.reply_text("✅ Vault code set ho gaya.")
 
 
 async def cmd_vault_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -74,17 +74,13 @@ async def cmd_vault_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.reply_to_message:
         msg = update.message.reply_to_message
         if msg.photo:
-            file_id = msg.photo[-1].file_id
-            file_name = f"photo_{msg.photo[-1].file_unique_id}.jpg"
+            file_id, file_name = msg.photo[-1].file_id, f"photo_{msg.photo[-1].file_unique_id}.jpg"
         elif msg.video:
-            file_id = msg.video.file_id
-            file_name = msg.video.file_name or f"video_{msg.video.file_unique_id}.mp4"
+            file_id, file_name = msg.video.file_id, msg.video.file_name or f"video_{msg.video.file_unique_id}.mp4"
         elif msg.document:
-            file_id = msg.document.file_id
-            file_name = msg.document.file_name or f"doc_{msg.document.file_unique_id}"
+            file_id, file_name = msg.document.file_id, msg.document.file_name or f"doc_{msg.document.file_unique_id}"
         elif msg.voice:
-            file_id = msg.voice.file_id
-            file_name = f"voice_{msg.voice.file_unique_id}.ogg"
+            file_id, file_name = msg.voice.file_id, f"voice_{msg.voice.file_unique_id}.ogg"
     if not file_id:
         last_media = memory.get_last_media(uid)
         if last_media and last_media.get("file_id"):
@@ -113,7 +109,6 @@ async def cmd_vault_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔐 Vault empty hai.")
         return
     text = "🔐 **Private Vault**\n\n" + "\n".join(f"• `{e['id']}` — {e['label']}" for e in entries)
-    text += "\n\nSession 15 min tak unlocked rahega."
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
