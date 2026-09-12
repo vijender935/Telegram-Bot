@@ -1,4 +1,3 @@
-import io
 import json
 import logging
 from pathlib import Path
@@ -57,14 +56,8 @@ class DriveClient:
         if key in self._folder_cache:
             return self._folder_cache[key]
         root = parent_id or self.folder_id
-        q = (
-            f"'{root}' in parents and "
-            f"mimeType='application/vnd.google-apps.folder' and trashed=false"
-        )
-        res = self._service.files().list(
-            q=q, pageSize=50, fields="files(id,name)",
-            supportsAllDrives=True, includeItemsFromAllDrives=True,
-        ).execute()
+        q = f"'{root}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        res = self._service.files().list(q=q, pageSize=50, fields="files(id,name)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
         folders = res.get("files", [])
         for f in folders:
             if f["name"].lower().strip() == key:
@@ -81,18 +74,11 @@ class DriveClient:
         label = "Map"
         name = (subfolder_name or "root").strip()
         low = name.lower()
-
         if low not in ("", "root", "main", "map"):
             found = self.find_folder_id(name)
             if not found:
-                q = (
-                    f"'{self.folder_id}' in parents and "
-                    f"mimeType='application/vnd.google-apps.folder' and trashed=false"
-                )
-                res = self._service.files().list(
-                    q=q, pageSize=30, fields="files(name)",
-                    supportsAllDrives=True, includeItemsFromAllDrives=True,
-                ).execute()
+                q = f"'{self.folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+                res = self._service.files().list(q=q, pageSize=30, fields="files(name)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
                 available = [f["name"] for f in res.get("files", [])]
                 msg = f"Subfolder nahi mili: '{name}'"
                 if available:
@@ -101,15 +87,7 @@ class DriveClient:
             target_id = found
             label = name
 
-        res = self._service.files().list(
-            q=f"'{target_id}' in parents and trashed=false",
-            pageSize=100,
-            fields="files(id,name,mimeType,size)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-            orderBy="folder,name",
-        ).execute()
-
+        res = self._service.files().list(q=f"'{target_id}' in parents and trashed=false", pageSize=100, fields="files(id,name,mimeType,size)", supportsAllDrives=True, includeItemsFromAllDrives=True, orderBy="folder,name").execute()
         files = res.get("files", [])
         if not files:
             self.serial_store.set_list(user_id, {})
@@ -118,9 +96,7 @@ class DriveClient:
         entries: dict[int, FileEntry] = {}
         lines = [f"📁 {label}\n"]
         for i, f in enumerate(files, start=1):
-            entries[i] = FileEntry(
-                file_id=f["id"], name=f["name"], mime=f.get("mimeType", "")
-            )
+            entries[i] = FileEntry(file_id=f["id"], name=f["name"], mime=f.get("mimeType", ""))
             tag = self.mime_label(f.get("mimeType", ""))
             size = f.get("size")
             if size:
@@ -129,7 +105,6 @@ class DriveClient:
                 lines.append(f"{i}. {f['name']}  [{tag}]  {sz}")
             else:
                 lines.append(f"{i}. {f['name']}  [{tag}]")
-
         self.serial_store.set_list(user_id, entries)
         lines.append("\nNumber bhej dena agar koi file chahiye.")
         return "\n".join(lines)
@@ -138,7 +113,6 @@ class DriveClient:
         if not mime:
             meta = self._service.files().get(fileId=file_id, fields="mimeType").execute()
             mime = meta.get("mimeType", "")
-
         if mime.startswith("application/vnd.google-apps."):
             export = "text/plain"
             if "spreadsheet" in mime:
@@ -156,9 +130,7 @@ class DriveClient:
                 while not done:
                     _, done = dl.next_chunk()
 
-
     def _resolve_folder(self, subfolder_name: str) -> tuple[str, str]:
-        """Return (folder_id, label)."""
         name = (subfolder_name or "root").strip()
         low = name.lower()
         if low in ("", "root", "main", "map"):
@@ -169,29 +141,11 @@ class DriveClient:
         return found, name
 
     def _list_entries(self, target_id: str) -> dict[int, FileEntry]:
-        res = self._service.files().list(
-            q=f"'{target_id}' in parents and trashed=false",
-            pageSize=100,
-            fields="files(id,name,mimeType,size)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-            orderBy="folder,name",
-        ).execute()
-        files = res.get("files", [])
-        entries: dict[int, FileEntry] = {}
-        for i, f in enumerate(files, start=1):
-            entries[i] = FileEntry(
-                file_id=f["id"], name=f["name"], mime=f.get("mimeType", "")
-            )
-        return entries
+        res = self._service.files().list(q=f"'{target_id}' in parents and trashed=false", pageSize=100, fields="files(id,name,mimeType,size)", supportsAllDrives=True, includeItemsFromAllDrives=True, orderBy="folder,name").execute()
+        return {i: FileEntry(file_id=f["id"], name=f["name"], mime=f.get("mimeType", "")) for i, f in enumerate(res.get("files", []), start=1)}
 
-    def download_by_serial(
-        self, user_id: int, serial: int, dest_dir: Path, subfolder: str = "root"
-    ) -> tuple[str, str]:
-        """One-shot: optional subfolder list → serial download. List cache update."""
+    def download_by_serial(self, user_id: int, serial: int, dest_dir: Path, subfolder: str = "root") -> tuple[str, str]:
         entry = self.serial_store.get(user_id, serial)
-
-        # Agar list miss / expire aur subfolder diya → pehle list banao silently
         if not entry and subfolder:
             try:
                 target_id, _ = self._resolve_folder(subfolder)
@@ -202,12 +156,10 @@ class DriveClient:
                 return "error", f"'{subfolder}' khali hai."
             self.serial_store.set_list(user_id, entries)
             entry = entries.get(int(serial))
-
         if not entry:
             entry = self.serial_store.get(user_id, serial)
         if not entry:
             return "error", "Serial invalid ya list expire. Pehle list karo YA: insta se 2 download karo"
-
         dest = dest_dir / Path(entry.name).name
         try:
             self.download_to_path(entry.file_id, dest, entry.mime)
@@ -216,11 +168,7 @@ class DriveClient:
             logger.exception("download failed")
             return "error", f"Download fail: {type(e).__name__}: {e}"
 
-
-    def download_random(
-        self, user_id: int, subfolder: str, dest_dir: Path, media_kind: str = "any"
-    ) -> tuple[str, str]:
-        """Random file. media_kind: any | image | video"""
+    def download_random(self, user_id: int, subfolder: str, dest_dir: Path, media_kind: str = "any") -> tuple[str, str]:
         import random
         try:
             target_id, label = self._resolve_folder(subfolder)
@@ -230,7 +178,6 @@ class DriveClient:
         kind = (media_kind or "any").lower()
         img_ext = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic")
         vid_ext = (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v")
-
         def match(entry) -> bool:
             if entry.mime == "application/vnd.google-apps.folder":
                 return False
@@ -240,7 +187,6 @@ class DriveClient:
             if kind == "video":
                 return entry.mime.startswith("video/") or ext in vid_ext
             return True
-
         files = {k: v for k, v in entries.items() if match(v)}
         if not files:
             want = {"image": "photo/image", "video": "video"}.get(kind, "downloadable")
@@ -256,20 +202,11 @@ class DriveClient:
             logger.exception("random download failed")
             return "error", f"Fail: {e}"
 
-
-
     def search(self, query: str) -> str:
         if not query.strip():
             return "Search query empty."
-        # Use semantic search keywords
         q = f"name contains '{query.strip()}' and trashed=false"
-        res = self._service.files().list(
-            q=q,
-            pageSize=30,
-            fields="files(name,mimeType)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-        ).execute()
+        res = self._service.files().list(q=q, pageSize=30, fields="files(name,mimeType)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
         files = res.get("files", [])
         if not files:
             return f"Koi file nahi mili: '{query}'"
@@ -279,22 +216,16 @@ class DriveClient:
         return "\n".join(lines)
 
     def semantic_download(self, user_id: int, description: str, dest_dir: Path) -> tuple[str, str]:
-        """Search for a file matching description and download it."""
         import random
         q = f"name contains '{description.strip()}' and trashed=false"
         try:
-            res = self._service.files().list(
-                q=q, pageSize=10, fields="files(id,name,mimeType)",
-                supportsAllDrives=True, includeItemsFromAllDrives=True,
-            ).execute()
+            res = self._service.files().list(q=q, pageSize=10, fields="files(id,name,mimeType)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
             files = res.get("files", [])
             if not files:
-                # Fallback to random if search fails
                 return self.download_random(user_id, "root", dest_dir)
-            
             entry = random.choice(files)
-            dest = dest_dir / Path(entry['name']).name
-            self.download_to_path(entry['id'], dest, entry['mimeType'])
+            dest = dest_dir / Path(entry["name"]).name
+            self.download_to_path(entry["id"], dest, entry["mimeType"])
             return "ok", dest.name
         except Exception as e:
             logger.exception("semantic download failed")
@@ -304,7 +235,5 @@ class DriveClient:
         name = drive_name or local_path.name
         meta = {"name": name, "parents": [self.folder_id]}
         media = MediaFileUpload(str(local_path), resumable=True)
-        uploaded = self._service.files().create(
-            body=meta, media_body=media, fields="id,name", supportsAllDrives=True
-        ).execute()
+        uploaded = self._service.files().create(body=meta, media_body=media, fields="id,name", supportsAllDrives=True).execute()
         return uploaded.get("name", name)

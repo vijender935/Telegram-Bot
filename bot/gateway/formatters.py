@@ -55,7 +55,7 @@ async def send_local_file(update: Update, path: Path):
                     document=f, filename=name,
                     read_timeout=120, write_timeout=120, connect_timeout=60,
                 )
-    except Exception as e:
+    except Exception:
         logger.exception("send_local_file failed")
         await update.message.reply_text("Abhi bhej nahi paayi, thodi der baad try karo.")
     finally:
