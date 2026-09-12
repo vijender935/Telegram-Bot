@@ -1,5 +1,6 @@
 """Drive application facade adding semantic ranking without changing the Telegram gateway."""
 from __future__ import annotations
+
 from pathlib import Path
 
 from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
@@ -19,7 +20,6 @@ class DriveService:
             for entry in entries.values():
                 self.index.upsert(entry.file_id, entry.name)
         except Exception:
-            # Search must remain available even when indexing is temporarily unavailable.
             return
 
     def search(self, query: str) -> str:
@@ -35,6 +35,7 @@ class DriveService:
         return "\n".join(lines) if len(lines) > 1 else self.client.search(query)
 
     def semantic_download(self, user_id: int, description: str, dest_dir: Path):
+        dest_dir = Path(dest_dir)
         self._refresh_root_index()
         results = self.index.search(description, limit=5)
         for key, text, score in results:
