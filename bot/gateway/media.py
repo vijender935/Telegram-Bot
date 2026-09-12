@@ -100,24 +100,19 @@ async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     memory = context.application.bot_data["memory"]
     history = memory.get_history(uid)
-    
     text = " ".join(context.args) if context.args else ""
     if not text:
         for msg in reversed(history):
             if isinstance(msg, AIMessage):
                 text = msg.content
                 break
-    
     if not text:
         await update.message.reply_text("Pehle kuch baat toh karo, tabhi toh bolungi 😏")
         return
-
     await update.message.reply_text("Ek sec, voice note bhej rahi hoon...")
-    
     sandbox = context.application.bot_data["sandbox"]
     filename = f"voice_{uid}.mp3"
     path = sandbox.path_for(filename)
-    
     if generate_voice_note(text, path):
         try:
             with open(path, 'rb') as f:
@@ -142,24 +137,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         name = f"photo_{uid}_{photo.file_unique_id}.jpg"
         path = sandbox.path_for(name)
         await f.download_to_drive(str(path))
-        
         h = memory.get_history(uid)
         h.append(HumanMessage(content="[photo]"))
         memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
-        
-        # describe + add to memory
         desc = await _describe_and_remember(context, uid, name, file_id=photo.file_id)
-        
-        # Enhanced reaction
         if desc:
             mood = memory.get_mood(uid)
             follow = media_followup_lines(desc, mood)
             await update.message.reply_text(follow)
             h.append(AIMessage(content=follow))
             memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
-        
         await _ask_enhance_mode(update, context, name)
-            
     except Exception:
         logger.exception("photo failed")
         await update.message.reply_text("Photo fail.")
@@ -176,13 +164,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     low = name.lower()
     is_audio = low.endswith((".mp3", ".ogg", ".oga", ".m4a", ".wav", ".aac", ".flac", ".webm"))
     is_video = low.endswith((".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"))
-
     try:
         tg_file = await context.bot.get_file(doc.file_id)
         buf = io.BytesIO()
         await tg_file.download_to_memory(buf)
         data = buf.getvalue()
-
         if is_audio and groq_key:
             await _transcribe_and_reply(update, context, data, name, f"audio: {name}")
         elif is_video and groq_key:
@@ -213,9 +199,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tg_file = await context.bot.get_file(voice.file_id)
         buf = io.BytesIO()
         await tg_file.download_to_memory(buf)
-        await _transcribe_and_reply(
-            update, context, buf.getvalue(), "voice.ogg", "voice note"
-        )
+        await _transcribe_and_reply(update, context, buf.getvalue(), "voice.ogg", "voice note")
     except Exception:
         logger.exception("voice failed")
         await update.message.reply_text("Voice fail.")
@@ -289,10 +273,7 @@ FILE_ACTIONS = [
 async def _ask_file_method(update: Update, context: ContextTypes.DEFAULT_TYPE, local_name: str, kind: str):
     context.user_data["pending_file"] = {"name": local_name, "kind": kind}
     keyboard = [[InlineKeyboardButton(t, callback_data=d)] for t, d in FILE_ACTIONS]
-    await update.message.reply_text(
-        f"File '{local_name}' mili. Kya karun?",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    await update.message.reply_text(f"File '{local_name}' mili. Kya karun?", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -308,7 +289,6 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     drive = _get_drive(context)
     path = sandbox.path_for(name)
     action = query.data
-    
     if action == "fileact_skip":
         path.unlink(missing_ok=True)
         context.user_data.pop("pending_file", None)
@@ -364,10 +344,7 @@ ENHANCE_ACTIONS = [
 async def _ask_enhance_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, local_name: str):
     context.user_data["enhance_file"] = local_name
     keyboard = [[InlineKeyboardButton(t, callback_data=d)] for t, d in ENHANCE_ACTIONS]
-    await update.message.reply_text(
-        "Photo mili. Enhance karein?",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    await update.message.reply_text("Photo mili. Enhance karein?", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def cmd_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
@@ -388,14 +365,12 @@ async def enhance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("enhance_file", None)
         await query.edit_message_text("Skip 👍")
         return
-        
     local_name = context.user_data.get("enhance_file")
     sandbox = context.application.bot_data["sandbox"]
     path = sandbox.path_for(local_name)
     if not path.exists():
         await query.edit_message_text("File missing — dubara bhejo.")
         return
-
     await query.edit_message_text("🎨 AI Enhancement shuru ho raha hai… ⏳")
     try:
         image_bytes = path.read_bytes()
@@ -405,9 +380,7 @@ async def enhance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         output_name = f"enhanced_{local_name}"
         output_path = sandbox.path_for(output_name)
         output_path.write_bytes(enhanced_bytes)
-        
         await context.bot.send_photo(chat_id=query.message.chat_id, photo=enhanced_bytes, caption=f"✅ {description}")
-        
         h = memory.get_history(uid)
         h.append(AIMessage(content=f"[Enhanced image bheji]\n{description}"))
         memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
@@ -442,13 +415,12 @@ async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, seria
         await update.message.reply_text("Abhi files nahi khol pa rahi.")
         return
     sandbox = context.application.bot_data["sandbox"]
-    uid = update.effective_user.id
     await update.message.reply_text("ruki…")
-    status, msg = drive.download_by_serial(uid, serial, sandbox.root, subfolder=subfolder)
+    status, msg = drive.download_by_serial(update.effective_user.id, serial, sandbox.root, subfolder=subfolder)
     if status != "ok":
         await update.message.reply_text(msg)
         return
-    await _send_media_with_followup(update, context, msg, uid)
+    await send_local_file(update, sandbox.path_for(msg))
 
 async def _transcribe_and_reply(update, context, file_bytes, filename, label):
     memory = context.application.bot_data["memory"]
@@ -465,7 +437,6 @@ async def _transcribe_and_reply(update, context, file_bytes, filename, label):
             await status.delete()
         except Exception:
             pass
-            
         llm = context.application.bot_data["llm"]
         tools = context.application.bot_data["tools"]
         ctx = build_context_packet(memory, uid, user_text=preview)
