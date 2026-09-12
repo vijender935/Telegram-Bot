@@ -93,7 +93,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     drive = context.application.bot_data.get("drive")
                     if drive and val:
                         await update.message.reply_text("Ruko, dhundh rahi hoon... 👁️")
-                        status, msg = drive.download_semantic(uid, val, config.SANDBOX_PATH)
+                        status, msg = drive.semantic_download(uid, val, config.SANDBOX_PATH)
                         if status == "ok":
                             from bot.gateway.media import _send_media_with_followup
                             await _send_media_with_followup(update, context, msg, uid)
