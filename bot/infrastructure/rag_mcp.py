@@ -45,11 +45,11 @@ class RAGMCPClient:
         """Discover MCP tools. Failure is isolated and leaves an empty tool set."""
         if not self.configured:
             return []
-        headers = {"Authorization": f"Bearer {self.api_key}" } if self.api_key else {}
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         self.client = MultiServerMCPClient(
             {
                 "rag": {
-                    "transport": "http",
+                    "transport": "streamable_http",
                     "url": self.url,
                     "headers": headers,
                 }
