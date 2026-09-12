@@ -6,6 +6,8 @@ langchain==0.3.20
 langchain-core==0.3.55
 langchain-groq==0.3.2
 langchain-community==0.3.18
+langchain-mcp-adapters==0.2.2
+mcp==1.28.0
 
 # Configuration / web
 python-dotenv>=1.0.0
