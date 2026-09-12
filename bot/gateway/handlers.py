@@ -4,7 +4,7 @@ from collections import defaultdict
 
 from telegram import Update
 from telegram.ext import ContextTypes
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from bot import config
 from bot.gateway.base import _allowed
@@ -13,6 +13,7 @@ from bot.domain.orchestrator import build_context_packet, maybe_update_session_s
 from bot.domain.learning import should_extract, extract_and_merge
 from bot.agent.chat_agent import build_chat_agent
 from bot.agent.action_registry import parse_action_tags
+from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
 
 from bot.gateway.commands import *
@@ -31,7 +32,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if limiter and not limiter.allow(f"chat:{uid}"):
         await update.message.reply_text("⏳ Thoda slow — ek minute mein bahut zyada requests aa gayi hain.")
         return
-
     async with _USER_LOCKS[uid]:
         await _handle_text_locked(update, context, uid)
 
@@ -40,7 +40,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_text = update.message.text or ""
     memory = context.application.bot_data["memory"]
     llm = context.application.bot_data["llm"]
-    tools = context.application.bot_data["tools"]
+    drive = context.application.bot_data.get("drive")
 
     ctx = build_context_packet(memory, uid, user_text=user_text)
     history = memory.get_history(uid)
@@ -48,17 +48,39 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
 
     try:
+        tools = build_tools(memory=memory, drive=drive, user_id=uid, sandbox_path=config.SANDBOX_PATH)
         chain = build_chat_agent(
             llm, tools,
-            current_mood=ctx["mood"],
-            user_profile=ctx["profile"],
-            session_summary=ctx["session_summary_text"],
-            last_media=ctx["last_media_text"],
-            active_fantasy=ctx["fantasy_text"],
-            emotion=ctx["emotion"],
-            time_context=ctx["time_context"],
+            current_mood=ctx["mood"], user_profile=ctx["profile"],
+            session_summary=ctx["session_summary_text"], last_media=ctx["last_media_text"],
+            active_fantasy=ctx["fantasy_text"], emotion=ctx["emotion"], time_context=ctx["time_context"],
         )
-        full_reply = await chain.ainvoke({"input": user_text, "chat_history": history[:-1]})
+
+        response = await chain.ainvoke({"input": user_text, "chat_history": history[:-1]})
+        # Native tool loop: model -> tool -> result -> model. Two rounds prevents runaway execution.
+        for _ in range(2):
+            tool_calls = getattr(response, "tool_calls", None) or []
+            if not tool_calls:
+                break
+            tool_map = {tool.name: tool for tool in tools}
+            tool_messages = []
+            for call in tool_calls:
+                tool = tool_map.get(call.get("name"))
+                if not tool:
+                    tool_messages.append(ToolMessage(content="Unknown tool", tool_call_id=call.get("id", "unknown")))
+                    continue
+                try:
+                    result = tool.invoke(call.get("args", {}))
+                    tool_messages.append(ToolMessage(content=str(result)[:4000], tool_call_id=call.get("id", "unknown")))
+                except Exception as exc:
+                    logger.exception("tool execution failed name=%s", call.get("name"))
+                    tool_messages.append(ToolMessage(content=f"Tool failed: {type(exc).__name__}", tool_call_id=call.get("id", "unknown")))
+            response = await chain.ainvoke({
+                "input": user_text,
+                "chat_history": history[:-1] + [response] + tool_messages,
+            })
+
+        full_reply = getattr(response, "content", None) or str(response)
         clean_reply, actions = parse_action_tags(full_reply)
 
         if clean_reply:
@@ -80,7 +102,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                     context.args = [val] if val else []
                     await cmd_vault_open(update, context)
                 elif tag in ("SEND_MEDIA", "DRIVE_GET"):
-                    drive = context.application.bot_data.get("drive")
                     if drive and val:
                         await update.message.reply_text("🔎 Search kar rahi hoon…")
                         status, msg = drive.semantic_download(uid, val, config.SANDBOX_PATH)
@@ -101,8 +122,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                 logger.exception("action failed tag=%s", tag)
 
         if should_extract(user_text):
-            new_info = await extract_and_merge(llm, ctx["profile"], user_text, clean_reply)
-            memory.set_profile(uid, new_info)
+            memory.set_profile(uid, await extract_and_merge(llm, ctx["profile"], user_text, clean_reply))
         await maybe_update_session_summary(llm, memory, uid, user_text, clean_reply)
 
     except BotError:
