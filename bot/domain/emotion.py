@@ -1,7 +1,5 @@
-"""Lightweight emotion / energy detection from user text (no extra LLM call)."""
+"""Lightweight emotion state access for the chat domain."""
 from __future__ import annotations
-
-import re
 
 # Hardcoded rules removed. AI now sets emotion via [SET_EMOTION] tag.
 
