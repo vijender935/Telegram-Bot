@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from bot.agent.prompts import SYSTEM_PROMPT
@@ -39,8 +40,12 @@ def build_chat_agent(
         memory_context=memory_context or "(no relevant long-term memories)",
         response_policy=response_policy,
     ) + evolution_text
+
+    # System content contains user/profile/memory text. Passing it as a
+    # SystemMessage prevents literal braces in that data (for example JSON)
+    # from being interpreted as LangChain template variables.
     prompt = ChatPromptTemplate.from_messages([
-        ("system", system),
+        SystemMessage(content=system),
         MessagesPlaceholder("chat_history"),
         ("human", "{input}"),
     ])
