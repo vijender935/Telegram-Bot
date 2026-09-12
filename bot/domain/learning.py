@@ -26,8 +26,9 @@ REMEMBER_PATTERNS = (
     r"\bi\s+love\b", r"\bmeri\s+fantasy\b", r"\bmera\s+naam\b", r"\bcall\s+me\b",
     r"\bprefer\b", r"\bpasand\s+hai\b", r"\b(?:mujhe|main)\s+(?:hamesha|usually|generally)\b",
     r"\b(?:mujhe|main)\s+(?:short|long|detailed|detail)\b", r"\b(?:don't|do not|never)\s+(?:like|want|prefer)\b",
-    r"\b(?:samajh|samjh)\s+(?:aata|aati)\s+hai\b", r"\bmeri\s+preference\b",
+    r"\b(?:samajh|samjh)\s+(?:aata|aati|aate)\s+hai\b", r"\bmeri\s+preference\b",
     r"\breply\s+(?:short|long|medium|detail|detailed)\b", r"\bdetail\s+mein\s+(?:samjha|bata)\b",
+    r"\bexamples?\s+(?:ke\s+saath|with)\b",
 )
 
 
