@@ -21,6 +21,7 @@ from bot.infra.memory import MemoryStore
 from bot.infra.serial_map import SerialMapStore
 from bot.infra.drive_client import DriveClient
 from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
+from bot.infrastructure.rag_mcp import RAGMCPClient
 from bot.application.drive_service import DriveService
 from bot.application.vault_guard import VaultGuard
 from bot.application.secure_memory import SecureMemory
@@ -48,7 +49,14 @@ def home():
 
 @web_app.route("/health")
 def health():
-    return jsonify(check_health(config, config.MEMORY_DB_PATH))
+    result = check_health(config, config.MEMORY_DB_PATH)
+    rag = web_app.config.get("rag_mcp")
+    result["rag_mcp"] = {
+        "configured": bool(rag and rag.configured),
+        "available": bool(rag and rag.available),
+        "url": rag._safe_url() if rag else "",
+    }
+    return jsonify(result)
 
 
 def run_web() -> None:
@@ -117,10 +125,21 @@ async def run_bot() -> None:
         except Exception:
             logger.exception("Drive init failed; continuing without Drive")
 
+    rag_mcp = RAGMCPClient(
+        config.RAG_MCP_URL if config.RAG_MCP_ENABLED else "",
+        api_key=config.RAG_MCP_API_KEY,
+        timeout=config.RAG_MCP_TIMEOUT_SECONDS,
+        top_k=config.RAG_MCP_TOP_K,
+        mode=config.RAG_MCP_MODE,
+    )
+    await rag_mcp.initialize()
+    web_app.config["rag_mcp"] = rag_mcp
+
     llm = ChatGroq(model=config.GROQ_MODEL, groq_api_key=config.GROQ_API_KEY, temperature=config.TEMPERATURE)
     app = Application.builder().token(config.TELEGRAM_TOKEN).concurrent_updates(True).build()
     app.bot_data.update({
         "sandbox": sandbox, "memory": memory, "serial_store": serial_store, "drive": drive,
+        "rag_mcp": rag_mcp, "rag_tools": rag_mcp.tools,
         "llm": llm, "groq_api_key": config.GROQ_API_KEY,
         "rate_limiter": SlidingWindowRateLimiter(config.RATE_LIMIT_PER_MINUTE, 60),
         "vault_guard": VaultGuard(config.VAULT_MAX_ATTEMPTS, config.VAULT_LOCKOUT_SECONDS),
@@ -145,7 +164,13 @@ async def run_bot() -> None:
     if app.job_queue:
         app.job_queue.run_repeating(proactive_ping, interval=3600 * 6, first=3600)
 
-    logger.info("Bot v3 ready | model=%s | vision=%s", config.GROQ_MODEL, config.GROQ_VISION_MODEL)
+    logger.info(
+        "Bot v3 ready | model=%s | vision=%s | rag_mcp=%s tools=%s",
+        config.GROQ_MODEL,
+        config.GROQ_VISION_MODEL,
+        rag_mcp.available,
+        sorted(rag_mcp.tool_map),
+    )
     await app.initialize()
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
