@@ -79,4 +79,5 @@ class SemanticIndex:
         else:
             qt = self._tokens(query)
             ranked = [(k, t, len(qt & self._tokens(t)) / max(1, len(qt))) for k, t, _ in rows]
+        ranked = [item for item in ranked if item[2] > 0.0]
         return sorted(ranked, key=lambda x: x[2], reverse=True)[: max(1, limit)]
