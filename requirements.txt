@@ -3,9 +3,11 @@ python-telegram-bot>=21.0,<22.0
 
 # AI / orchestration
 langchain==0.3.20
-langchain-core==0.3.55
+langchain-core==0.3.80
 langchain-groq==0.3.2
 langchain-community==0.3.18
+langchain-mcp-adapters==0.1.14
+mcp==1.28.0
 
 # Configuration / web
 python-dotenv>=1.0.0

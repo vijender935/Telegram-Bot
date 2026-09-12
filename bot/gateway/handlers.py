@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from bot import config
 from bot.gateway.base import _allowed
-from bot.gateway.formatters import send_long_text
+from bot.gateway.formatters import send_long_text, send_local_file
 from bot.domain.orchestrator import build_context_packet, maybe_update_session_summary
 from bot.domain.learning import should_extract, extract_and_merge
 from bot.agent.chat_agent import build_chat_agent
@@ -42,11 +42,18 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     memory = context.application.bot_data["memory"]
     llm = context.application.bot_data["llm"]
     drive = context.application.bot_data.get("drive")
+    rag_tools = context.application.bot_data.get("rag_tools", [])
 
     ctx = build_context_packet(memory, uid, user_text=user_text)
     history = memory.get_history(uid)
     response_policy = infer_response_policy(user_text, ctx["profile"])
-    tools = build_tools(memory=memory, drive=drive, user_id=uid, sandbox_path=config.SANDBOX_PATH)
+    tools = build_tools(
+        memory=memory,
+        drive=drive,
+        user_id=uid,
+        sandbox_path=config.SANDBOX_PATH,
+        mcp_tools=rag_tools,
+    )
     chain = build_chat_agent(
         llm, tools,
         current_mood=ctx["mood"], user_profile=ctx["profile"],
@@ -71,7 +78,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                     tool_messages.append(ToolMessage(content="Unknown tool", tool_call_id=call.get("id", "unknown")))
                     continue
                 try:
-                    result = tool.invoke(call.get("args", {}))
+                    result = await tool.ainvoke(call.get("args", {}))
                     tool_messages.append(ToolMessage(content=str(result)[:4000], tool_call_id=call.get("id", "unknown")))
                 except Exception as exc:
                     logger.exception("tool execution failed name=%s user=%s", call.get("name"), uid)
@@ -127,6 +134,14 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                         await _send_media_with_followup(update, context, msg, uid)
                     else:
                         await update.message.reply_text(msg)
+            elif tag == "RAG_SEND_MEDIA":
+                rag_mcp = context.application.bot_data.get("rag_mcp")
+                if not rag_mcp or not rag_mcp.available or not val:
+                    await update.message.reply_text("RAG image search abhi available nahi hai.")
+                else:
+                    await update.message.reply_text("🧠 Indexed images mein search kar rahi hoon…")
+                    path = await rag_mcp.download_top_image(val, config.SANDBOX_PATH)
+                    await send_local_file(update, path)
             elif tag == "SET_EMOTION" and val:
                 memory.set_emotion(uid, val.lower()[:40])
             elif tag == "EVOLVE" and val:
