@@ -19,3 +19,15 @@ def test_profile_style_is_respected_for_general_conversation():
     policy = infer_response_policy("aaj kaafi interesting din tha", {"language": "hindi", "reply_style": "medium"})
     assert policy.language == "hindi"
     assert policy.length == "medium"
+
+
+def test_explicit_short_request_overrides_default_detail():
+    policy = infer_response_policy("short reply mein batao")
+    assert policy.mode == "concise"
+    assert policy.length == "short"
+
+
+def test_explicit_detail_request_enables_explanation():
+    policy = infer_response_policy("examples ke saath detail mein samjhao")
+    assert policy.mode == "technical"
+    assert policy.should_explain
