@@ -18,9 +18,10 @@ def build_chat_agent(
     active_fantasy: str = "",
     emotion: str = "neutral",
     time_context: str = "",
+    memory_context: str = "",
     response_policy: str = "mode=conversation; language=hinglish; length=adaptive; ask_followup=False; explain=False",
 ):
-    """Build the conversational model with explicit context and response policy."""
+    """Build the conversational model with explicit policy and relevance-ranked context."""
     evolution_text = ""
     if user_profile and user_profile.get("persona_evolution"):
         evolution_text = "\n## Learned style adjustments\n" + "\n".join(
@@ -35,6 +36,7 @@ def build_chat_agent(
         active_fantasy=active_fantasy or "(none)",
         emotion=emotion or "neutral",
         time_context=time_context or "current time context unavailable",
+        memory_context=memory_context or "(no relevant long-term memories)",
         response_policy=response_policy,
     ) + evolution_text
     prompt = ChatPromptTemplate.from_messages([
