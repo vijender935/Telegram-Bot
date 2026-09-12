@@ -1,3 +1,6 @@
+"""Conversation chain construction."""
+from __future__ import annotations
+
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
@@ -14,12 +17,15 @@ def build_chat_agent(
     last_media: str = "",
     active_fantasy: str = "",
     emotion: str = "neutral",
-    time_context: str = "Night time vibe.",
+    time_context: str = "",
+    response_policy: str = "mode=conversation; language=hinglish; length=adaptive; ask_followup=False; explain=False",
 ):
-    """Build a tool-capable chat model while retaining the existing persona prompt."""
+    """Build the conversational model with explicit context and response policy."""
     evolution_text = ""
     if user_profile and user_profile.get("persona_evolution"):
-        evolution_text = "\n## Personality Evolution\n" + "\n".join(f"- {e}" for e in user_profile["persona_evolution"])
+        evolution_text = "\n## Learned style adjustments\n" + "\n".join(
+            f"- {e}" for e in user_profile["persona_evolution"]
+        )
 
     system = SYSTEM_PROMPT.format(
         current_mood=current_mood or "neutral",
@@ -28,7 +34,8 @@ def build_chat_agent(
         last_media=last_media or "(no recent media shared)",
         active_fantasy=active_fantasy or "(none)",
         emotion=emotion or "neutral",
-        time_context=time_context,
+        time_context=time_context or "current time context unavailable",
+        response_policy=response_policy,
     ) + evolution_text
     prompt = ChatPromptTemplate.from_messages([
         ("system", system),
