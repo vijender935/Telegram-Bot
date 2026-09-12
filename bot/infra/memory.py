@@ -1,9 +1,10 @@
-import json
-import time
-import threading
-import os
 import hashlib
+import json
+import os
 import sqlite3
+import threading
+import time
+
 from langchain_core.messages import HumanMessage, AIMessage
 
 
@@ -40,7 +41,7 @@ class MemoryStore:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS moods (
                         user_id INTEGER PRIMARY KEY,
-                        mood TEXT NOT NULL DEFAULT 'Strapon / Pegging'
+                        mood TEXT NOT NULL DEFAULT 'neutral'
                     )
                 """)
                 conn.execute("""
@@ -159,7 +160,7 @@ class MemoryStore:
 
     def get_mood(self, user_id: int) -> str:
         row = self._execute("SELECT mood FROM moods WHERE user_id = %s", (user_id,), fetch="one")
-        return row[0] if row else "Strapon / Pegging"
+        return row[0] if row else "neutral"
 
     def set_mood(self, user_id: int, mood: str):
         self._execute(
@@ -174,7 +175,7 @@ class MemoryStore:
             return {}
         try:
             return json.loads(row[0])
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             return {}
 
     def set_profile(self, user_id: int, profile: dict):
