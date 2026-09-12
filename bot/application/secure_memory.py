@@ -5,6 +5,7 @@ upgraded to PBKDF2-SHA256. New codes always use the v2 format.
 """
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import time
 from bot.core.security import hash_secret, verify_secret
@@ -35,12 +36,15 @@ class SecureMemory:
             row = conn.execute("SELECT code_hash FROM vault_codes_v2 WHERE user_id=?", (user_id,)).fetchone()
         if row:
             return verify_secret(code, row[0])
-        # Backwards-compatible migration from the old SHA-256 format.
         legacy = self.store.get_vault_code(user_id)
         if not legacy:
             return False
-        import hashlib
         ok = legacy == hashlib.sha256(code.encode()).hexdigest()
         if ok:
             self.set_vault_code(user_id, code)
         return ok
+
+    def clear_all_for_user(self, user_id: int):
+        self.store.clear_all_for_user(user_id)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM vault_codes_v2 WHERE user_id=?", (user_id,))
