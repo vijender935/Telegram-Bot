@@ -1,144 +1,174 @@
+"""Production bootstrap for the Telegram AI companion."""
+from __future__ import annotations
+
 import asyncio
 import logging
 import threading
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, jsonify
+from waitress import serve
+from telegram import Update
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters,
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes,
 )
 from langchain_groq import ChatGroq
 
 from bot import config
+from bot.core.logging import configure_logging
+from bot.core.health import check_health
+from bot.core.security import SlidingWindowRateLimiter
 from bot.infra.sandbox import SandboxStorage
 from bot.infra.memory import MemoryStore
 from bot.infra.serial_map import SerialMapStore
 from bot.infra.drive_client import DriveClient
+from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
+from bot.application.drive_service import DriveService
+from bot.application.vault_guard import VaultGuard
 from bot.agent.tools import build_tools
 from bot.gateway.handlers import handle_text
 from bot.gateway.commands import (
-    cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_fullreset, cmd_mood, mood_callback
+    cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_fullreset, cmd_mood, mood_callback,
 )
+from bot.gateway.settings import cmd_settings
 from bot.gateway.media import (
     cmd_voice, cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
     handle_photo, handle_document, handle_voice, handle_audio, handle_video, handle_video_note,
-    file_action_callback, enhance_callback, cmd_enhance
+    file_action_callback, enhance_callback, cmd_enhance,
 )
 from bot.gateway.vault import (
-    cmd_vault_setcode, cmd_vault_add, cmd_vault_list, cmd_vault_open, cmd_vault_del
+    cmd_vault_setcode, cmd_vault_add, cmd_vault_list, cmd_vault_open, cmd_vault_del,
 )
+from bot.gateway.ui import home_text, home_keyboard
 from bot.gateway.scheduler import proactive_ping
 
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    level=logging.INFO,
-)
+configure_logging(config.LOG_LEVEL)
 logger = logging.getLogger(__name__)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("telegram").setLevel(logging.WARNING)
-logging.getLogger("googleapiclient").setLevel(logging.WARNING)
-
 web_app = Flask(__name__)
 
 
 @web_app.route("/")
 def home():
-    return "Telegram Bot v2 running 🔥"
+    return "Telegram Bot v3 • healthy"
 
 
-def run_web():
-    web_app.run(host="0.0.0.0", port=config.PORT)
+@web_app.route("/health")
+def health():
+    return jsonify(check_health(config, config.MEMORY_DB_PATH))
 
 
-async def run_bot():
+def run_web() -> None:
+    serve(web_app, host="0.0.0.0", port=config.PORT, threads=4)
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.exception("Unhandled Telegram update", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        await update.effective_message.reply_text("Temporary error aa gaya. Dobara try karo.")
+
+
+async def ui_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if query.data == "ui_mood":
+        await cmd_mood(update, context)
+    elif query.data == "ui_profile":
+        await cmd_profile(update, context)
+    elif query.data == "ui_settings":
+        await query.edit_message_text("⚙️ Settings kholne ke liye /settings use karo.")
+    elif query.data == "ui_drive":
+        await query.edit_message_text("☁️ Drive controls: /drive • /search • /download")
+    elif query.data == "ui_vault":
+        await query.edit_message_text("🔐 Vault controls: /vault_setcode • /vault_list • /vault_open")
+    elif query.data == "ui_voice":
+        await query.edit_message_text("🎙 Last reply ko voice mein sunne ke liye /voice use karo.")
+    elif query.data == "ui_memory":
+        await query.edit_message_text("🧠 Memory active hai. /clear sirf chat history clear karta hai.")
+
+
+async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    memory = context.application.bot_data["memory"]
+    uid = query.from_user.id
+    if query.data == "set_clear":
+        memory.clear_history(uid)
+        await query.edit_message_text("🧠 Chat history clear ho gayi. Profile safe hai.")
+    elif query.data == "set_profile":
+        await query.edit_message_text("👤 Profile dekhne ke liye /profile use karo.")
+    elif query.data == "set_mood":
+        await query.edit_message_text("🎭 Mood choose karne ke liye /mood use karo.")
+    elif query.data == "set_reset":
+        memory.clear_all_for_user(uid)
+        await query.edit_message_text("🔐 User data reset ho gaya.")
+
+
+async def run_bot() -> None:
+    config.validate_startup()
     Path(config.SANDBOX_PATH).mkdir(parents=True, exist_ok=True)
     Path(config.MEMORY_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
     sandbox = SandboxStorage(config.SANDBOX_PATH)
     memory = MemoryStore(config.MEMORY_DB_PATH)
-    serial_store = SerialMapStore(
-        ttl_seconds=config.SERIAL_MAP_TTL_SECONDS,
-        db_path=config.MEMORY_DB_PATH,
-    )
-    try:
-        drive = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
-        logger.info("DriveClient initialized OK")
-    except Exception as e:
-        logger.warning("DriveClient init failed — Drive features disabled: %s", e)
-        drive = None
-    llm = ChatGroq(
-        model=config.GROQ_MODEL,
-        groq_api_key=config.GROQ_API_KEY,
-        temperature=config.TEMPERATURE,
-    )
+    serial_store = SerialMapStore(ttl_seconds=config.SERIAL_MAP_TTL_SECONDS, db_path=config.MEMORY_DB_PATH)
+
+    drive = None
+    if config.GOOGLE_FOLDER_ID and config.GOOGLE_SA_JSON:
+        try:
+            client = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
+            drive = DriveService(client, SemanticIndex(config.MEMORY_DB_PATH))
+            logger.info("Drive + semantic index initialized")
+        except Exception:
+            logger.exception("Drive init failed; continuing without Drive")
+
+    llm = ChatGroq(model=config.GROQ_MODEL, groq_api_key=config.GROQ_API_KEY, temperature=config.TEMPERATURE)
     tools = build_tools()
+    app = Application.builder().token(config.TELEGRAM_TOKEN).concurrent_updates(True).build()
 
-    app = (
-        Application.builder()
-        .token(config.TELEGRAM_TOKEN)
-        .concurrent_updates(True)
-        .build()
-    )
+    app.bot_data.update({
+        "sandbox": sandbox, "memory": memory, "serial_store": serial_store,
+        "drive": drive, "llm": llm, "tools": tools, "groq_api_key": config.GROQ_API_KEY,
+        "rate_limiter": SlidingWindowRateLimiter(config.RATE_LIMIT_PER_MINUTE, 60),
+        "vault_guard": VaultGuard(config.VAULT_MAX_ATTEMPTS, config.VAULT_LOCKOUT_SECONDS),
+    })
 
-    app.bot_data["sandbox"] = sandbox
-    app.bot_data["memory"] = memory
-    app.bot_data["serial_store"] = serial_store
-    app.bot_data["drive"] = drive
-    app.bot_data["llm"] = llm
-    app.bot_data["tools"] = tools
-    app.bot_data["groq_api_key"] = config.GROQ_API_KEY
-
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("clear", cmd_clear))
-    app.add_handler(CommandHandler("profile", cmd_profile))
-    app.add_handler(CommandHandler("forgetprofile", cmd_forgetprofile))
-    app.add_handler(CommandHandler("fullreset", cmd_fullreset))
-    app.add_handler(CommandHandler("mood", cmd_mood))
-    app.add_handler(CommandHandler("voice", cmd_voice))
-    app.add_handler(CommandHandler("vault_setcode", cmd_vault_setcode))
-    app.add_handler(CommandHandler("vault_add", cmd_vault_add))
-    app.add_handler(CommandHandler("vault_list", cmd_vault_list))
-    app.add_handler(CommandHandler("vault_open", cmd_vault_open))
-    app.add_handler(CommandHandler("vault_del", cmd_vault_del))
-    app.add_handler(CallbackQueryHandler(mood_callback, pattern="^mood_"))
-    app.add_handler(CallbackQueryHandler(file_action_callback, pattern="^fileact_"))
-    app.add_handler(CallbackQueryHandler(enhance_callback, pattern="^enhance_"))
-    app.add_handler(CommandHandler("enhance", cmd_enhance))
-    app.add_handler(CommandHandler("drive", cmd_drive))
-    app.add_handler(CommandHandler("list", cmd_list))
-    app.add_handler(CommandHandler("download", cmd_download))
-    app.add_handler(CommandHandler("search", cmd_search))
-    app.add_handler(CommandHandler("upload", cmd_upload))
-    app.add_handler(CommandHandler("delete", cmd_delete))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    app.add_handler(MessageHandler(filters.AUDIO, handle_audio))
-    app.add_handler(MessageHandler(filters.VIDEO, handle_video))
-    app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
+    handlers = [
+        CommandHandler("start", cmd_start), CommandHandler("clear", cmd_clear),
+        CommandHandler("profile", cmd_profile), CommandHandler("forgetprofile", cmd_forgetprofile),
+        CommandHandler("fullreset", cmd_fullreset), CommandHandler("mood", cmd_mood),
+        CommandHandler("settings", cmd_settings), CommandHandler("voice", cmd_voice),
+        CommandHandler("vault_setcode", cmd_vault_setcode), CommandHandler("vault_add", cmd_vault_add),
+        CommandHandler("vault_list", cmd_vault_list), CommandHandler("vault_open", cmd_vault_open),
+        CommandHandler("vault_del", cmd_vault_del), CommandHandler("enhance", cmd_enhance),
+        CommandHandler("drive", cmd_drive), CommandHandler("list", cmd_list),
+        CommandHandler("download", cmd_download), CommandHandler("search", cmd_search),
+        CommandHandler("upload", cmd_upload), CommandHandler("delete", cmd_delete),
+        CallbackQueryHandler(mood_callback, pattern="^mood_"),
+        CallbackQueryHandler(file_action_callback, pattern="^fileact_"),
+        CallbackQueryHandler(enhance_callback, pattern="^enhance_"),
+        CallbackQueryHandler(ui_callback, pattern="^ui_"),
+        CallbackQueryHandler(settings_callback, pattern="^set_"),
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
+        MessageHandler(filters.Document.ALL, handle_document), MessageHandler(filters.PHOTO, handle_photo),
+        MessageHandler(filters.VOICE, handle_voice), MessageHandler(filters.AUDIO, handle_audio),
+        MessageHandler(filters.VIDEO, handle_video), MessageHandler(filters.VIDEO_NOTE, handle_video_note),
+    ]
+    for handler in handlers:
+        app.add_handler(handler)
+    app.add_error_handler(error_handler)
 
     if app.job_queue:
         app.job_queue.run_repeating(proactive_ping, interval=3600 * 6, first=3600)
 
-    logger.info(
-        "Bot v2 started | temp=%s | vision=%s | describe=%s",
-        config.TEMPERATURE,
-        config.GROQ_VISION_MODEL,
-        config.MEDIA_DESCRIBE_ON_DOWNLOAD,
-    )
+    logger.info("Bot v3 ready | model=%s | vision=%s", config.GROQ_MODEL, config.GROQ_VISION_MODEL)
     await app.initialize()
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
     await asyncio.Event().wait()
 
 
-def main():
-    threading.Thread(target=run_web, daemon=True).start()
+def main() -> None:
+    threading.Thread(target=run_web, daemon=True, name="health-server").start()
     asyncio.run(run_bot())
 
 
