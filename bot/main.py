@@ -9,33 +9,60 @@ from pathlib import Path
 from flask import Flask, jsonify
 from waitress import serve
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 from langchain_groq import ChatGroq
 
 from bot import config
-from bot.core.logging import configure_logging
-from bot.core.health import check_health
-from bot.core.security import SlidingWindowRateLimiter
-from bot.infra.sandbox import SandboxStorage
-from bot.infra.memory import MemoryStore
-from bot.infra.serial_map import SerialMapStore
-from bot.infra.drive_client import DriveClient
-from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
-from bot.infrastructure.rag_mcp import RAGMCPClient
 from bot.application.drive_service import DriveService
-from bot.application.vault_guard import VaultGuard
 from bot.application.secure_memory import SecureMemory
+from bot.application.vault_guard import VaultGuard
+from bot.core.health import check_health
+from bot.core.logging import configure_logging
+from bot.core.security import SlidingWindowRateLimiter
 from bot.domain.memory.service import MemoryService
-from bot.gateway.handlers import handle_text
-from bot.gateway.commands import cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_fullreset, cmd_mood, mood_callback
-from bot.gateway.settings import cmd_settings
-from bot.gateway.media import (
-    cmd_voice, cmd_drive, cmd_list, cmd_download, cmd_search, cmd_upload, cmd_delete,
-    handle_photo, handle_document, handle_voice, handle_audio, handle_video, handle_video_note,
-    file_action_callback, enhance_callback, cmd_enhance,
+from bot.gateway.commands import (
+    cmd_clear,
+    cmd_forgetprofile,
+    cmd_fullreset,
+    cmd_mood,
+    cmd_profile,
+    cmd_start,
+    mood_callback,
 )
-from bot.gateway.vault import cmd_vault_setcode, cmd_vault_add, cmd_vault_list, cmd_vault_open, cmd_vault_del
+from bot.gateway.handlers import handle_text
+from bot.gateway.media import (
+    cmd_delete,
+    cmd_download,
+    cmd_drive,
+    cmd_enhance,
+    cmd_list,
+    cmd_search,
+    cmd_upload,
+    cmd_voice,
+    enhance_callback,
+    file_action_callback,
+    handle_audio,
+    handle_document,
+    handle_photo,
+    handle_video,
+    handle_video_note,
+    handle_voice,
+)
 from bot.gateway.scheduler import proactive_ping
+from bot.gateway.settings import cmd_settings
+from bot.gateway.vault import (
+    cmd_vault_add,
+    cmd_vault_del,
+    cmd_vault_list,
+    cmd_vault_open,
+    cmd_vault_setcode,
+)
+from bot.infra.drive_client import DriveClient
+from bot.infra.memory import MemoryStore
+from bot.infra.sandbox import SandboxStorage
+from bot.infra.serial_map import SerialMapStore
+from bot.infrastructure.rag_mcp import RAGMCPClient
+from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
 
 configure_logging(config.LOG_LEVEL)
 logger = logging.getLogger(__name__)
@@ -55,6 +82,9 @@ def health():
         "configured": bool(rag and rag.configured),
         "available": bool(rag and rag.available),
         "url": rag._safe_url() if rag else "",
+        "tools": sorted(rag.tool_map) if rag else [],
+        "last_error": rag.last_error if rag else "",
+        "last_health": rag.last_health if rag else {},
     }
     return jsonify(result)
 
@@ -131,45 +161,75 @@ async def run_bot() -> None:
         timeout=config.RAG_MCP_TIMEOUT_SECONDS,
         top_k=config.RAG_MCP_TOP_K,
         mode=config.RAG_MCP_MODE,
+        retries=config.RAG_MCP_RETRIES,
     )
     await rag_mcp.initialize()
+    if rag_mcp.configured:
+        await rag_mcp.health()
     web_app.config["rag_mcp"] = rag_mcp
 
     llm = ChatGroq(model=config.GROQ_MODEL, groq_api_key=config.GROQ_API_KEY, temperature=config.TEMPERATURE)
     app = Application.builder().token(config.TELEGRAM_TOKEN).concurrent_updates(True).build()
     app.bot_data.update({
-        "sandbox": sandbox, "memory": memory, "serial_store": serial_store, "drive": drive,
-        "rag_mcp": rag_mcp, "rag_tools": rag_mcp.tools,
-        "llm": llm, "groq_api_key": config.GROQ_API_KEY,
+        "sandbox": sandbox,
+        "memory": memory,
+        "serial_store": serial_store,
+        "drive": drive,
+        "rag_mcp": rag_mcp,
+        "rag_tools": rag_mcp.tools,
+        "llm": llm,
+        "groq_api_key": config.GROQ_API_KEY,
         "rate_limiter": SlidingWindowRateLimiter(config.RATE_LIMIT_PER_MINUTE, 60),
         "vault_guard": VaultGuard(config.VAULT_MAX_ATTEMPTS, config.VAULT_LOCKOUT_SECONDS),
     })
 
-    for handler in [
-        CommandHandler("start", cmd_start), CommandHandler("clear", cmd_clear), CommandHandler("profile", cmd_profile),
-        CommandHandler("forgetprofile", cmd_forgetprofile), CommandHandler("fullreset", cmd_fullreset), CommandHandler("mood", cmd_mood),
-        CommandHandler("settings", cmd_settings), CommandHandler("voice", cmd_voice), CommandHandler("vault_setcode", cmd_vault_setcode),
-        CommandHandler("vault_add", cmd_vault_add), CommandHandler("vault_list", cmd_vault_list), CommandHandler("vault_open", cmd_vault_open),
-        CommandHandler("vault_del", cmd_vault_del), CommandHandler("enhance", cmd_enhance), CommandHandler("drive", cmd_drive),
-        CommandHandler("list", cmd_list), CommandHandler("download", cmd_download), CommandHandler("search", cmd_search),
-        CommandHandler("upload", cmd_upload), CommandHandler("delete", cmd_delete), CallbackQueryHandler(mood_callback, pattern="^mood_"),
-        CallbackQueryHandler(file_action_callback, pattern="^fileact_"), CallbackQueryHandler(enhance_callback, pattern="^enhance_"),
-        CallbackQueryHandler(ui_callback, pattern="^ui_"), CallbackQueryHandler(settings_callback, pattern="^set_"),
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text), MessageHandler(filters.Document.ALL, handle_document),
-        MessageHandler(filters.PHOTO, handle_photo), MessageHandler(filters.VOICE, handle_voice), MessageHandler(filters.AUDIO, handle_audio),
-        MessageHandler(filters.VIDEO, handle_video), MessageHandler(filters.VIDEO_NOTE, handle_video_note),
-    ]:
+    handlers = [
+        CommandHandler("start", cmd_start),
+        CommandHandler("clear", cmd_clear),
+        CommandHandler("profile", cmd_profile),
+        CommandHandler("forgetprofile", cmd_forgetprofile),
+        CommandHandler("fullreset", cmd_fullreset),
+        CommandHandler("mood", cmd_mood),
+        CommandHandler("settings", cmd_settings),
+        CommandHandler("voice", cmd_voice),
+        CommandHandler("vault_setcode", cmd_vault_setcode),
+        CommandHandler("vault_add", cmd_vault_add),
+        CommandHandler("vault_list", cmd_vault_list),
+        CommandHandler("vault_open", cmd_vault_open),
+        CommandHandler("vault_del", cmd_vault_del),
+        CommandHandler("enhance", cmd_enhance),
+        CommandHandler("drive", cmd_drive),
+        CommandHandler("list", cmd_list),
+        CommandHandler("download", cmd_download),
+        CommandHandler("search", cmd_search),
+        CommandHandler("upload", cmd_upload),
+        CommandHandler("delete", cmd_delete),
+        CallbackQueryHandler(mood_callback, pattern="^mood_"),
+        CallbackQueryHandler(file_action_callback, pattern="^fileact_"),
+        CallbackQueryHandler(enhance_callback, pattern="^enhance_"),
+        CallbackQueryHandler(ui_callback, pattern="^ui_"),
+        CallbackQueryHandler(settings_callback, pattern="^set_"),
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
+        MessageHandler(filters.Document.ALL, handle_document),
+        MessageHandler(filters.PHOTO, handle_photo),
+        MessageHandler(filters.VOICE, handle_voice),
+        MessageHandler(filters.AUDIO, handle_audio),
+        MessageHandler(filters.VIDEO, handle_video),
+        MessageHandler(filters.VIDEO_NOTE, handle_video_note),
+    ]
+    for handler in handlers:
         app.add_handler(handler)
     app.add_error_handler(error_handler)
     if app.job_queue:
         app.job_queue.run_repeating(proactive_ping, interval=3600 * 6, first=3600)
 
     logger.info(
-        "Bot v3 ready | model=%s | vision=%s | rag_mcp=%s tools=%s",
+        "Bot v3 ready | model=%s | vision=%s | rag_mcp=%s tools=%s health=%s",
         config.GROQ_MODEL,
         config.GROQ_VISION_MODEL,
         rag_mcp.available,
         sorted(rag_mcp.tool_map),
+        rag_mcp.last_health.get("status", "unknown"),
     )
     await app.initialize()
     await app.start()
