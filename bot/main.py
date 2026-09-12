@@ -62,6 +62,7 @@ async def run_bot():
     memory = MemoryStore(config.MEMORY_DB_PATH)
     serial_store = SerialMapStore(
         ttl_seconds=config.SERIAL_MAP_TTL_SECONDS,
+        db_path=config.MEMORY_DB_PATH,
     )
     try:
         drive = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
