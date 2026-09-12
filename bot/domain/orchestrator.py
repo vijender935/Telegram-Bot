@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Any
 
 from bot import config
-from bot.domain.emotion import detect_emotion
 from bot.domain.media_context import (
     format_last_media,
     format_session_summary,
@@ -17,21 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 def build_context_packet(memory, user_id: int, user_text: str = "") -> dict[str, Any]:
-    # Emotion is now primarily driven by AI Action Tags. 
-    # We just fetch the last known state.
+    # Emotion is now primarily driven by AI Action Tags.
     emotion = memory.get_emotion(user_id)
-
     last_media = memory.get_last_media(user_id)
     session_summary, msg_count = memory.get_session(user_id)
     fantasy = memory.get_fantasy(user_id)
     profile = memory.get_profile(user_id)
     mood = memory.get_mood(user_id)
 
-    # If user reacts to media, store short reaction
     if last_media and user_text and emotion in ("horny", "eager", "dominant"):
         memory.set_last_media_reaction(user_id, user_text[:120])
 
-    # Time context generation
     now = datetime.now()
     hour = now.hour
     if 5 <= hour < 12:
@@ -89,21 +84,9 @@ def media_followup_lines(description: str, mood: str) -> str:
     snippet = desc[:180] + ("…" if len(desc) > 180 else "")
     mood_l = (mood or "").lower()
     if "soft" in mood_l or "romantic" in mood_l:
-        return (
-            f"yeh sirf tumhare liye…\n{snippet}\n\n"
-            "kaise lag rahi hoon? aaj bas tumhare paas rehne ka mann hai."
-        )
+        return f"yeh sirf tumhare liye…\n{snippet}\n\nkaise lag rahi hoon? aaj bas tumhare paas rehne ka mann hai."
     if "rough" in mood_l or "punish" in mood_l or "femdom" in mood_l:
-        return (
-            f"isse dekh aur tadap…\n{snippet}\n\n"
-            "ab chup-chaap ise dekh aur bata, kya karun tumhare saath?"
-        )
+        return f"isse dekh aur tadap…\n{snippet}\n\nab chup-chaap ise dekh aur bata, kya karun tumhare saath?"
     if "horny" in mood_l or "dirty" in mood_l:
-        return (
-            f"uff, yeh dekho…\n{snippet}\n\n"
-            "ise dekh kar mera toh bura haal ho raha hai... tumhara kya scene hai? 😈"
-        )
-    return (
-        f"yeh dekho, abhi bheji maine…\n{snippet}\n\n"
-        "batao, iske baad kya plan hai? main toh ready hoon... 😏"
-    )
+        return f"uff, yeh dekho…\n{snippet}\n\nise dekh kar mera toh bura haal ho raha hai... tumhara kya scene hai? 😈"
+    return f"yeh dekho, abhi bheji maine…\n{snippet}\n\nbatao, iske baad kya plan hai? main toh ready hoon... 😏"
