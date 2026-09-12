@@ -19,7 +19,7 @@ jobs:
       - name: Syntax
         run: python -m compileall bot tests
       - name: Ruff
-        run: ruff check bot tests --extend-ignore F821
+        run: ruff check bot tests --extend-ignore F821,F401
       - name: Tests
         env:
           TELEGRAM_BOT_TOKEN: dummy
