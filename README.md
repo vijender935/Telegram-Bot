@@ -1,61 +1,161 @@
-# 😈 Telegram Bot v2 — The Ultimate Agentic Companion
+# 😈 Telegram Bot v3
 
-The Telegram Bot v2 is a sophisticated, "AI-First" virtual companion designed to provide an intimate and highly personalized user experience. Unlike traditional bots that rely on rigid commands, this agent leverages advanced natural language understanding to act as a responsive partner. It integrates deep memory, sensory vision, and a secure private vault to create a truly immersive digital relationship.
+> **AI-first personal companion for Telegram** — memory, adaptive persona, vision, voice, Google Drive and a protected private vault.
 
-## 🚀 Core Capabilities
+## ✨ What changed in v3
 
-| Feature | Description |
-| :--- | :--- |
-| **Agentic Intelligence** | Uses AI-driven Action Tags to handle Voice, Vault, and Media requests naturally based on conversation context. |
-| **Persona Evolution** | The bot's personality evolves based on user interactions, preferences, and the current time of day. |
-| **Secure Private Vault** | A hashed-code protected storage system for private photos, videos, and notes. |
-| **Semantic Drive Search** | Allows users to retrieve files from Google Drive using descriptive language instead of file names or IDs. |
-| **Sensory Vision** | Image recognition that goes beyond identification to provide emotional and sensory feedback on shared media. |
-| **SQLite Memory** | Local SQLite storage for chat history, profile, mood, sessions, media memory, serial maps, and vault metadata. |
+This release restructures the project around production concerns without throwing away the existing Telegram features:
 
-## 🏗️ System Architecture
+- 🧠 Layered memory facade with persistent SQLite storage and semantic indexing
+- 🤖 Structured tool/action registry with validated legacy Action-Tag compatibility
+- 🔎 Semantic Drive ranking with an optional `sentence-transformers` embedding backend
+- 🔐 PBKDF2 vault credential migration, failed-attempt lockout and short unlock sessions
+- 🛡️ Per-user request serialization and configurable rate limiting
+- ⚙️ Central typed configuration validation
+- ❤️ Health/readiness endpoint and production Waitress server
+- 🧪 Pytest + Ruff CI gates
+- 💾 Verified SQLite backups with retention
+- 🐳 Production Docker image with FFmpeg and non-root runtime
+- 🎨 Button-first Telegram home/settings UI
+- 📚 Architecture, security, deployment and contribution documentation
 
-Telegram → Gateway → AI Agent → Domain Logic → Infra (Drive, SQLite Memory, Vision, TTS)
+## 🧩 Feature map
 
-## 📦 Setup and Deployment
+| Area | Capability |
+|---|---|
+| Chat | Groq-powered contextual conversation |
+| Memory | History, profile, sessions, emotion, media and semantic index |
+| Persona | Mood, emotion, profile learning and evolution |
+| Vision | Image description and media reactions |
+| Voice | TTS plus audio/video transcription |
+| Drive | List, search, upload, download and semantic ranking |
+| Vault | Protected private media metadata with lockout/session controls |
+| Media | Photo, document, audio, video and video-note workflows |
+| Operations | Health endpoint, structured logs, graceful error handling |
 
-Python 3.10+ and FFmpeg are required for local deployment. Configure `.env` from `.env.example`.
+## 🏗️ Architecture
 
-### Database
-
-The bot now uses **SQLite as its sole database backend**. SQLite is built into Python, so no database server or external database driver is required.
-
-Set `MEMORY_DB_PATH` when you want to choose the database location. The default is:
-
-- Render with `/var/data` mounted: `/var/data/bot_memory.db`
-- Other environments: `/tmp/bot_memory.db`
-
-**Important for Render:** the filesystem outside a mounted persistent disk is ephemeral. If you want memory to survive deploys/restarts, configure a Render persistent disk mounted at `/var/data` (or set `MEMORY_DB_PATH` to a path on your persistent mount). The repository cannot create or attach a Render persistent disk automatically.
-
-### SQLite backup
-
-Back up the SQLite file regularly. A simple manual backup is:
-
-```bash
-cp /var/data/bot_memory.db /var/data/bot_memory_backup_$(date +%Y%m%d).db
+```text
+Telegram
+   │
+   ▼
+Gateway / UI ── Auth ── Rate Limit ── Error Boundary
+   │
+   ▼
+Application Services
+   │
+   ├── Chat / Orchestration
+   ├── Memory
+   ├── Drive
+   ├── Vault
+   └── Media / Voice
+   │
+   ▼
+Domain
+   │
+   ├── Intent
+   ├── Persona / Mood
+   ├── Emotion
+   └── Session / Learning
+   │
+   ▼
+Infrastructure
+   ├── SQLite + semantic index
+   ├── Groq
+   ├── Google Drive
+   ├── FFmpeg
+   └── TTS / Vision / Transcription
 ```
 
-For local development, replace the path with the value of `MEMORY_DB_PATH`.
+The `bot/` tree remains the compatibility surface for existing handlers while `bot/application`, `bot/core`, `bot/domain/memory` and `bot/infrastructure` provide the new separation-of-concerns layer.
 
-### Primary Commands
+## 🚀 Quick start
 
-| Command | Function |
-| :--- | :--- |
-| `/start` | Initializes the session and introduces the bot's latest features. |
-| `/mood` | Opens an interactive menu to manually adjust the bot's current vibe. |
-| `/vault_setcode` | Establishes the secret access code required to enter the private vault. |
-| `/vault_list` | Displays vault metadata. |
-| `/voice` | Converts the last AI reply into a voice note. |
-| `/profile` | Displays the current profile stored for the user. |
+Python 3.11 and FFmpeg are recommended.
 
-## 🏗️ Modular Project Structure
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python -m bot.main
+```
 
-The codebase is organized into specialized directories. The `gateway` handles Telegram interactions, the `domain` layer contains core business logic, and the `infra` layer manages external service integrations and persistent SQLite memory.
+### Environment
 
----
-*Created for those who seek a deeper, more personal connection with artificial intelligence.*
+Copy `.env.example` and provide the required Telegram and Groq credentials. Google Drive is optional.
+
+For Render, mount persistent storage at `/var/data` and keep `MEMORY_DB_PATH=/var/data/bot_memory.db` if you want memory to survive restarts/deploys.
+
+### Health
+
+```text
+GET /
+GET /health
+```
+
+`/health` reports configuration, database-path and FFmpeg readiness.
+
+## 🎛️ Telegram UX
+
+`/start` opens a compact home panel. `/settings` provides memory/profile/mood/privacy shortcuts.
+
+Core commands include:
+
+`/start` · `/settings` · `/mood` · `/profile` · `/clear` · `/voice` · `/drive` · `/search` · `/download` · `/upload` · `/vault_setcode` · `/vault_list` · `/vault_open`
+
+## 🔐 Security notes
+
+- Only allowlisted Telegram IDs are accepted when `ALLOWED_USER_IDS` is configured.
+- Vault codes are migrated to PBKDF2-SHA256 with per-code salts.
+- Repeated vault failures trigger temporary lockout.
+- Sensitive vault command messages are deleted when Telegram permissions allow it.
+- User-facing errors avoid exposing provider exceptions.
+- Logs are designed to avoid credentials and secrets.
+
+See [SECURITY.md](SECURITY.md) for the threat model and operational checklist.
+
+## 💾 Backups
+
+```bash
+MEMORY_DB_PATH=/var/data/bot_memory.db ./scripts/backup_sqlite.sh
+```
+
+The script uses SQLite's online backup API, runs an integrity check and removes backups older than the configured retention window.
+
+## 🧪 Development
+
+```bash
+ruff check bot tests
+pytest
+python -m compileall bot tests
+```
+
+## 🐳 Docker
+
+```bash
+docker compose up --build
+```
+
+The image installs FFmpeg, runs as a non-root user and persists `/var/data` through the compose volume.
+
+## 🗺️ Roadmap status
+
+1. Production stability — **implemented**
+2. Configuration/error system — **implemented**
+3. Testing/CI — **implemented**
+4. Memory architecture — **implemented as migration facade**
+5. Tool registry — **implemented as structured execution layer**
+6. Agent orchestration — **migration seam implemented; legacy tags retained for compatibility**
+7. Vault security — **implemented**
+8. Semantic Drive — **implemented with optional embeddings + fallback**
+9. Persona engine — **existing engine retained and isolated behind domain layer**
+10. Telegram UI — **implemented**
+11. Repository docs — **implemented**
+12. Docker/deployment — **implemented**
+13. Observability — **health + structured/redacted logging implemented**
+14. Backup/disaster recovery — **verified backup + retention implemented**
+
+## 📄 License
+
+See repository license information.
