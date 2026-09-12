@@ -29,12 +29,15 @@ class MemoryService:
             created_at=time.time(),
         )
         if item.text and self.semantic_index:
-            self.semantic_index.upsert(
-                f"memory:{user_id}:{int(item.created_at * 1000)}", item.text
-            )
+            self.semantic_index.upsert(f"memory:{user_id}:{int(item.created_at * 1000)}", item.text)
         return item
 
     def search_user(self, user_id: int, query: str, limit: int = 10):
         if not self.semantic_index or not query:
             return []
         return self.semantic_index.search(query, limit, prefix=f"memory:{user_id}:")
+
+    def clear_all_for_user(self, user_id: int):
+        self.store.clear_all_for_user(user_id)
+        if self.semantic_index:
+            self.semantic_index.delete_prefix(f"memory:{user_id}:")
