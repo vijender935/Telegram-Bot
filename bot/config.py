@@ -10,7 +10,7 @@ GOOGLE_SA_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 
 # ── Image Enhancement APIs ──
 HF_TOKEN            = os.getenv("HF_TOKEN", "")
-hREPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
 
 # Persistent storage paths. On Render, mount a persistent disk at /var/data.
 SANDBOX_PATH = os.getenv("SANDBOX_PATH", "/var/data/bot_files" if os.path.isdir("/var/data") else "/tmp/bot_files")
