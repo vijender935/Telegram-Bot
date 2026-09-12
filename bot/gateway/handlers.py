@@ -52,13 +52,12 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
         current_mood=ctx["mood"], user_profile=ctx["profile"],
         session_summary=ctx["session_summary_text"], last_media=ctx["last_media_text"],
         active_fantasy=ctx["fantasy_text"], emotion=ctx["emotion"], time_context=ctx["time_context"],
+        memory_context=ctx.get("memory_context_text", ""),
         response_policy=response_policy.to_prompt(),
     )
 
-    # Do not persist a user message until the conversation turn has produced a response.
     try:
         response = await chain.ainvoke({"input": user_text, "chat_history": history})
-        # Native tool loop: model -> tool -> result -> model. Two rounds prevent runaway execution.
         for _ in range(2):
             tool_calls = getattr(response, "tool_calls", None) or []
             if not tool_calls:
@@ -76,12 +75,10 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                     tool_messages.append(ToolMessage(content=str(result)[:4000], tool_call_id=call.get("id", "unknown")))
                 except Exception as exc:
                     logger.exception("tool execution failed name=%s user=%s", call.get("name"), uid)
-                    tool_messages.append(
-                        ToolMessage(
-                            content=f"Tool execution failed ({type(exc).__name__}). Do not pretend it succeeded.",
-                            tool_call_id=call.get("id", "unknown"),
-                        )
-                    )
+                    tool_messages.append(ToolMessage(
+                        content=f"Tool execution failed ({type(exc).__name__}). Do not pretend it succeeded.",
+                        tool_call_id=call.get("id", "unknown"),
+                    ))
             response = await chain.ainvoke({
                 "input": user_text,
                 "chat_history": history + [response] + tool_messages,
@@ -90,7 +87,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
         full_reply = getattr(response, "content", None) or str(response)
         clean_reply, actions = parse_action_tags(full_reply)
         clean_reply = clean_reply.strip()
-
     except BotError:
         logger.exception("conversation generation failed user=%s", uid)
         await update.message.reply_text("Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo.")
@@ -100,7 +96,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("AI response generate nahi ho paaya. Thodi der mein dobara try karo.")
         return
 
-    # Conversation state is committed only after successful generation.
     history.extend([HumanMessage(content=user_text), AIMessage(content=clean_reply)])
     try:
         memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
@@ -110,7 +105,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     if clean_reply:
         await send_long_text(update, clean_reply)
 
-    # Actions are independent of generation. One broken action must not invalidate the reply.
     for tag, val in actions:
         try:
             if tag == "VOICE":
@@ -145,7 +139,13 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.exception("action failed tag=%s user=%s", tag, uid)
             await update.message.reply_text("Ye action complete nahi ho paaya, lekin upar wala reply valid hai.")
 
-    # Learning and summarisation are best-effort side effects. They cannot fail the chat turn.
+    try:
+        remember = getattr(memory, "remember", None)
+        if remember:
+            remember(uid, f"User: {user_text}\nAssistant: {clean_reply}", importance=0.55)
+    except Exception:
+        logger.exception("episodic memory indexing failed user=%s", uid)
+
     try:
         if should_extract(user_text):
             profile = await extract_and_merge(llm, ctx["profile"], user_text, clean_reply)
