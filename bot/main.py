@@ -25,7 +25,6 @@ from bot.application.drive_service import DriveService
 from bot.application.vault_guard import VaultGuard
 from bot.application.secure_memory import SecureMemory
 from bot.domain.memory.service import MemoryService
-from bot.agent.tools import build_tools
 from bot.gateway.handlers import handle_text
 from bot.gateway.commands import cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_fullreset, cmd_mood, mood_callback
 from bot.gateway.settings import cmd_settings
@@ -122,7 +121,7 @@ async def run_bot() -> None:
     app = Application.builder().token(config.TELEGRAM_TOKEN).concurrent_updates(True).build()
     app.bot_data.update({
         "sandbox": sandbox, "memory": memory, "serial_store": serial_store, "drive": drive,
-        "llm": llm, "tools": build_tools(), "groq_api_key": config.GROQ_API_KEY,
+        "llm": llm, "groq_api_key": config.GROQ_API_KEY,
         "rate_limiter": SlidingWindowRateLimiter(config.RATE_LIMIT_PER_MINUTE, 60),
         "vault_guard": VaultGuard(config.VAULT_MAX_ATTEMPTS, config.VAULT_LOCKOUT_SECONDS),
     })
