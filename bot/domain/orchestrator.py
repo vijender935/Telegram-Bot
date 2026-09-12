@@ -1,4 +1,4 @@
-"""Build rich context for chat + post-reply memory side effects."""
+"""Build rich, relevance-ranked context for the conversation engine."""
 from __future__ import annotations
 
 import logging
@@ -6,17 +6,27 @@ from datetime import datetime
 from typing import Any
 
 from bot import config
-from bot.domain.media_context import (
-    format_last_media,
-    format_session_summary,
-    format_active_fantasy,
-)
+from bot.domain.media_context import format_last_media, format_session_summary, format_active_fantasy
 
 logger = logging.getLogger(__name__)
 
 
+def _format_relevant_memories(memory, user_id: int, query: str, limit: int = 5) -> str:
+    search = getattr(memory, "search_user", None)
+    if not search or not query:
+        return "(no relevant long-term memories)"
+    try:
+        results = search(user_id, query, limit=limit)
+    except Exception:
+        logger.exception("memory retrieval failed user=%s", user_id)
+        return "(memory retrieval unavailable)"
+    useful = [item for item in results if len(item) >= 3 and item[2] > 0.15]
+    if not useful:
+        return "(no relevant long-term memories)"
+    return "\n".join(f"- {text[:500]} (relevance={score:.0%})" for _, text, score in useful)
+
+
 def build_context_packet(memory, user_id: int, user_text: str = "") -> dict[str, Any]:
-    # Emotion is now primarily driven by AI Action Tags.
     emotion = memory.get_emotion(user_id)
     last_media = memory.get_last_media(user_id)
     session_summary, msg_count = memory.get_session(user_id)
@@ -30,13 +40,13 @@ def build_context_packet(memory, user_id: int, user_text: str = "") -> dict[str,
     now = datetime.now()
     hour = now.hour
     if 5 <= hour < 12:
-        time_ctx = "Subah ka waqt hai, thoda sleepy aur fresh vibe."
+        time_ctx = "morning"
     elif 12 <= hour < 17:
-        time_ctx = "Dopehar ho rahi hai, busy din lekin tera khayal aa gaya."
+        time_ctx = "afternoon"
     elif 17 <= hour < 21:
-        time_ctx = "Shaam ka suhana waqt, relax karne ka mann hai."
+        time_ctx = "evening"
     else:
-        time_ctx = "Late night... sab shaant hai, bas main aur meri baatein."
+        time_ctx = "late night"
 
     return {
         "mood": mood,
@@ -48,29 +58,29 @@ def build_context_packet(memory, user_id: int, user_text: str = "") -> dict[str,
         "last_media_text": format_last_media(last_media),
         "session_summary_text": format_session_summary(session_summary),
         "fantasy_text": format_active_fantasy(fantasy),
+        "memory_context_text": _format_relevant_memories(memory, user_id, user_text),
         "time_context": time_ctx,
     }
 
 
 async def maybe_update_session_summary(llm, memory, user_id: int, user_text: str, bot_reply: str):
-    """Every N messages, compress recent chat into a short session summary."""
+    """Periodically compress the current conversation state without blocking chat."""
     count = memory.bump_session_count(user_id)
     every = max(4, config.SESSION_SUMMARY_EVERY)
     if count % every != 0:
         return
     prev, _ = memory.get_session(user_id)
     prompt = (
-        "Summarize this private chat session in 3-5 short Hinglish lines. "
-        "Keep: ongoing fantasy, media shared, user preferences, mood. "
-        "No markdown.\n\n"
+        "Summarize the current conversation state in 3-5 concise Hinglish lines. "
+        "Keep only active topic, unresolved goal, useful preferences and important context. "
+        "Do not invent facts and do not turn casual chatter into permanent preferences.\n\n"
         f"Previous summary:\n{prev or '(none)'}\n\n"
-        f"User: {user_text[:800]}\n"
-        f"Bot: {(bot_reply or '')[:800]}\n"
+        f"User:\n{user_text[:800]}\n"
+        f"Bot:\n{(bot_reply or '')[:800]}\n"
     )
     try:
         resp = await llm.ainvoke(prompt)
-        text = getattr(resp, "content", None) or str(resp)
-        text = (text or "").strip()[:800]
+        text = (getattr(resp, "content", None) or str(resp) or "").strip()[:800]
         if text:
             memory.set_session(user_id, text, count)
             logger.info("session summary updated user=%s count=%s", user_id, count)
@@ -79,14 +89,14 @@ async def maybe_update_session_summary(llm, memory, user_id: int, user_text: str
 
 
 def media_followup_lines(description: str, mood: str) -> str:
-    """Short lines after sending media — as if she sent it."""
+    """Short follow-up after media delivery."""
     desc = (description or "").strip()
     snippet = desc[:180] + ("…" if len(desc) > 180 else "")
     mood_l = (mood or "").lower()
     if "soft" in mood_l or "romantic" in mood_l:
-        return f"yeh sirf tumhare liye…\n{snippet}\n\nkaise lag rahi hoon? aaj bas tumhare paas rehne ka mann hai."
+        return f"yeh sirf tumhare liye…\n{snippet}\n\nbatao kaisi lagi?"
     if "rough" in mood_l or "punish" in mood_l or "femdom" in mood_l:
-        return f"isse dekh aur tadap…\n{snippet}\n\nab chup-chaap ise dekh aur bata, kya karun tumhare saath?"
+        return f"yeh dekho…\n{snippet}\n\nbatao, next kya chahiye?"
     if "horny" in mood_l or "dirty" in mood_l:
-        return f"uff, yeh dekho…\n{snippet}\n\nise dekh kar mera toh bura haal ho raha hai... tumhara kya scene hai? 😈"
-    return f"yeh dekho, abhi bheji maine…\n{snippet}\n\nbatao, iske baad kya plan hai? main toh ready hoon... 😏"
+        return f"uff, yeh dekho…\n{snippet}\n\nbatao, tumhara kya scene hai? 😈"
+    return f"yeh dekho…\n{snippet}\n\nbatao, kaisa laga?"
