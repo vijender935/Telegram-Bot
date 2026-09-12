@@ -13,6 +13,7 @@ from bot.domain.orchestrator import build_context_packet, maybe_update_session_s
 from bot.domain.learning import should_extract, extract_and_merge
 from bot.agent.chat_agent import build_chat_agent
 from bot.agent.action_registry import parse_action_tags
+from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
 
@@ -44,20 +45,20 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     ctx = build_context_packet(memory, uid, user_text=user_text)
     history = memory.get_history(uid)
-    history.append(HumanMessage(content=user_text))
-    memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
+    response_policy = infer_response_policy(user_text, ctx["profile"])
+    tools = build_tools(memory=memory, drive=drive, user_id=uid, sandbox_path=config.SANDBOX_PATH)
+    chain = build_chat_agent(
+        llm, tools,
+        current_mood=ctx["mood"], user_profile=ctx["profile"],
+        session_summary=ctx["session_summary_text"], last_media=ctx["last_media_text"],
+        active_fantasy=ctx["fantasy_text"], emotion=ctx["emotion"], time_context=ctx["time_context"],
+        response_policy=response_policy.to_prompt(),
+    )
 
+    # Do not persist a user message until the conversation turn has produced a response.
     try:
-        tools = build_tools(memory=memory, drive=drive, user_id=uid, sandbox_path=config.SANDBOX_PATH)
-        chain = build_chat_agent(
-            llm, tools,
-            current_mood=ctx["mood"], user_profile=ctx["profile"],
-            session_summary=ctx["session_summary_text"], last_media=ctx["last_media_text"],
-            active_fantasy=ctx["fantasy_text"], emotion=ctx["emotion"], time_context=ctx["time_context"],
-        )
-
-        response = await chain.ainvoke({"input": user_text, "chat_history": history[:-1]})
-        # Native tool loop: model -> tool -> result -> model. Two rounds prevents runaway execution.
+        response = await chain.ainvoke({"input": user_text, "chat_history": history})
+        # Native tool loop: model -> tool -> result -> model. Two rounds prevent runaway execution.
         for _ in range(2):
             tool_calls = getattr(response, "tool_calls", None) or []
             if not tool_calls:
@@ -67,67 +68,95 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
             for call in tool_calls:
                 tool = tool_map.get(call.get("name"))
                 if not tool:
+                    logger.error("unknown tool requested name=%s user=%s", call.get("name"), uid)
                     tool_messages.append(ToolMessage(content="Unknown tool", tool_call_id=call.get("id", "unknown")))
                     continue
                 try:
                     result = tool.invoke(call.get("args", {}))
                     tool_messages.append(ToolMessage(content=str(result)[:4000], tool_call_id=call.get("id", "unknown")))
                 except Exception as exc:
-                    logger.exception("tool execution failed name=%s", call.get("name"))
-                    tool_messages.append(ToolMessage(content=f"Tool failed: {type(exc).__name__}", tool_call_id=call.get("id", "unknown")))
+                    # The model gets a bounded failure signal; the full exception remains in logs.
+                    logger.exception("tool execution failed name=%s user=%s", call.get("name"), uid)
+                    tool_messages.append(
+                        ToolMessage(
+                            content=f"Tool execution failed ({type(exc).__name__}). Do not pretend it succeeded.",
+                            tool_call_id=call.get("id", "unknown"),
+                        )
+                    )
             response = await chain.ainvoke({
                 "input": user_text,
-                "chat_history": history[:-1] + [response] + tool_messages,
+                "chat_history": history + [HumanMessage(content=user_text), response] + tool_messages,
             })
 
         full_reply = getattr(response, "content", None) or str(response)
         clean_reply, actions = parse_action_tags(full_reply)
-
-        if clean_reply:
-            history.append(AIMessage(content=clean_reply))
-            memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
-            await send_long_text(update, clean_reply)
-
-        for tag, val in actions:
-            try:
-                if tag == "VOICE":
-                    context.args = [clean_reply] if clean_reply else []
-                    await cmd_voice(update, context)
-                elif tag == "VAULT_ADD":
-                    context.args = [val] if val else []
-                    await cmd_vault_add(update, context)
-                elif tag == "VAULT_LIST":
-                    await cmd_vault_list(update, context)
-                elif tag == "VAULT_OPEN":
-                    context.args = [val] if val else []
-                    await cmd_vault_open(update, context)
-                elif tag in ("SEND_MEDIA", "DRIVE_GET"):
-                    if drive and val:
-                        await update.message.reply_text("🔎 Search kar rahi hoon…")
-                        status, msg = drive.semantic_download(uid, val, config.SANDBOX_PATH)
-                        if status == "ok":
-                            from bot.gateway.media import _send_media_with_followup
-                            await _send_media_with_followup(update, context, msg, uid)
-                        else:
-                            await update.message.reply_text(msg)
-                elif tag == "SET_EMOTION" and val:
-                    memory.set_emotion(uid, val.lower()[:40])
-                elif tag == "EVOLVE" and val:
-                    profile = memory.get_profile(uid) or {}
-                    evolutions = profile.get("persona_evolution", [])
-                    evolutions.append(val[:300])
-                    profile["persona_evolution"] = evolutions[-8:]
-                    memory.set_profile(uid, profile)
-            except Exception:
-                logger.exception("action failed tag=%s", tag)
-
-        if should_extract(user_text):
-            memory.set_profile(uid, await extract_and_merge(llm, ctx["profile"], user_text, clean_reply))
-        await maybe_update_session_summary(llm, memory, uid, user_text, clean_reply)
+        clean_reply = clean_reply.strip()
 
     except BotError:
-        logger.exception("expected bot error")
-        await update.message.reply_text("Request complete nahi ho paayi. Thodi der baad try karo.")
+        logger.exception("conversation generation failed user=%s", uid)
+        await update.message.reply_text("Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo.")
+        return
     except Exception:
-        logger.exception("chat failed")
-        await update.message.reply_text("Abhi AI service busy hai. Thodi der mein dobara try karo.")
+        # This boundary is only for the actual conversation-generation pipeline.
+        # Post-processing failures below must never turn a successful answer into a fake AI failure.
+        logger.exception("conversation generation failed user=%s", uid)
+        await update.message.reply_text("AI response generate nahi ho paaya. Thodi der mein dobara try karo.")
+        return
+
+    # Conversation state is committed only after successful generation.
+    history.extend([HumanMessage(content=user_text), AIMessage(content=clean_reply)])
+    try:
+        memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
+    except Exception:
+        logger.exception("conversation history persistence failed user=%s", uid)
+
+    if clean_reply:
+        await send_long_text(update, clean_reply)
+
+    # Actions are independent of generation. One broken action must not invalidate the reply.
+    for tag, val in actions:
+        try:
+            if tag == "VOICE":
+                context.args = [clean_reply] if clean_reply else []
+                await cmd_voice(update, context)
+            elif tag == "VAULT_ADD":
+                context.args = [val] if val else []
+                await cmd_vault_add(update, context)
+            elif tag == "VAULT_LIST":
+                await cmd_vault_list(update, context)
+            elif tag == "VAULT_OPEN":
+                context.args = [val] if val else []
+                await cmd_vault_open(update, context)
+            elif tag in ("SEND_MEDIA", "DRIVE_GET"):
+                if drive and val:
+                    await update.message.reply_text("🔎 Search kar rahi hoon…")
+                    status, msg = drive.semantic_download(uid, val, config.SANDBOX_PATH)
+                    if status == "ok":
+                        from bot.gateway.media import _send_media_with_followup
+                        await _send_media_with_followup(update, context, msg, uid)
+                    else:
+                        await update.message.reply_text(msg)
+            elif tag == "SET_EMOTION" and val:
+                memory.set_emotion(uid, val.lower()[:40])
+            elif tag == "EVOLVE" and val:
+                profile = memory.get_profile(uid) or {}
+                evolutions = profile.get("persona_evolution", [])
+                evolutions.append(val[:300])
+                profile["persona_evolution"] = evolutions[-8:]
+                memory.set_profile(uid, profile)
+        except Exception:
+            logger.exception("action failed tag=%s user=%s", tag, uid)
+            await update.message.reply_text("Ye action complete nahi ho paaya, lekin upar wala reply valid hai.")
+
+    # Learning and summarisation are best-effort side effects. They cannot fail the chat turn.
+    try:
+        if should_extract(user_text):
+            profile = await extract_and_merge(llm, ctx["profile"], user_text, clean_reply)
+            memory.set_profile(uid, profile)
+    except Exception:
+        logger.exception("profile learning side effect failed user=%s", uid)
+
+    try:
+        await maybe_update_session_summary(llm, memory, uid, user_text, clean_reply)
+    except Exception:
+        logger.exception("session summary side effect failed user=%s", uid)
