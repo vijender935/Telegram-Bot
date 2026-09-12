@@ -1,4 +1,4 @@
-name: Pre-Deploy Tests
+name: CI
 
 on:
   push:
@@ -7,45 +7,24 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
+      - name: Install
+        run: pip install -r requirements.txt
       - name: Syntax
-        run: python -m compileall bot && echo OK
-      - name: Intent + sandbox + SQLite unit check
+        run: python -m compileall bot tests
+      - name: Ruff
+        run: ruff check bot tests
+      - name: Tests
         env:
           TELEGRAM_BOT_TOKEN: dummy
           GROQ_API_KEY: dummy
           GOOGLE_DRIVE_FOLDER_ID: dummy
           GOOGLE_SERVICE_ACCOUNT_JSON: "{}"
           MEMORY_DB_PATH: /tmp/ci_memory.db
-        run: |
-          python -c "
-          from bot.domain.intent import parse_intent, Intent
-          from bot.infra.sandbox import SandboxStorage
-          from bot.infra.memory import MemoryStore
-          from langchain_core.messages import HumanMessage, AIMessage
-          assert parse_intent('3 download karo').intent == Intent.DRIVE_DOWNLOAD
-          assert parse_intent('3 download karo').serial == 3
-          assert parse_intent('insta se 2 download').serial == 2
-          assert parse_intent('photo bhej').intent == Intent.CHAT
-          assert parse_intent('hello baby').intent == Intent.CHAT
-          s = SandboxStorage('/tmp/ci_test')
-          s.write_bytes('t.txt', b'ok')
-          assert s.exists('t.txt')
-          db = MemoryStore('/tmp/ci_memory.db')
-          db.save_history(123, [HumanMessage(content='hello'), AIMessage(content='hi')])
-          assert [m.content for m in db.get_history(123)] == ['hello', 'hi']
-          db.set_profile(123, {'name': 'test'})
-          assert db.get_profile(123) == {'name': 'test'}
-          db.set_emotion(123, 'happy')
-          assert db.get_emotion(123) == 'happy'
-          db.clear_all_for_user(123)
-          assert db.get_history(123) == []
-          print('OK')
-          "
+        run: pytest -q
