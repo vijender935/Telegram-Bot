@@ -23,6 +23,7 @@ from bot.infra.drive_client import DriveClient
 from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
 from bot.application.drive_service import DriveService
 from bot.application.vault_guard import VaultGuard
+from bot.domain.memory.service import MemoryService
 from bot.agent.tools import build_tools
 from bot.gateway.handlers import handle_text
 from bot.gateway.commands import cmd_start, cmd_clear, cmd_profile, cmd_forgetprofile, cmd_fullreset, cmd_mood, mood_callback
@@ -102,14 +103,16 @@ async def run_bot() -> None:
     Path(config.MEMORY_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
     sandbox = SandboxStorage(config.SANDBOX_PATH)
-    memory = MemoryStore(config.MEMORY_DB_PATH)
+    store = MemoryStore(config.MEMORY_DB_PATH)
+    semantic_index = SemanticIndex(config.MEMORY_DB_PATH)
+    memory = MemoryService(store, semantic_index)
     serial_store = SerialMapStore(ttl_seconds=config.SERIAL_MAP_TTL_SECONDS, db_path=config.MEMORY_DB_PATH)
 
     drive = None
     if config.GOOGLE_FOLDER_ID and config.GOOGLE_SA_JSON:
         try:
             client = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
-            drive = DriveService(client, SemanticIndex(config.MEMORY_DB_PATH))
+            drive = DriveService(client, semantic_index)
             logger.info("Drive + semantic index initialized")
         except Exception:
             logger.exception("Drive init failed; continuing without Drive")
