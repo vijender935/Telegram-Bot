@@ -23,6 +23,7 @@ from bot.infra.drive_client import DriveClient
 from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
 from bot.application.drive_service import DriveService
 from bot.application.vault_guard import VaultGuard
+from bot.application.secure_memory import SecureMemory
 from bot.domain.memory.service import MemoryService
 from bot.agent.tools import build_tools
 from bot.gateway.handlers import handle_text
@@ -67,9 +68,9 @@ async def ui_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if query.data == "ui_mood":
         await cmd_mood(update, context)
     elif query.data == "ui_profile":
-        await cmd_profile(update, context)
+        await query.edit_message_text("👤 Profile: /profile")
     elif query.data == "ui_settings":
-        await query.edit_message_text("⚙️ Settings ke liye /settings use karo.")
+        await query.edit_message_text("⚙️ Settings: /settings")
     elif query.data == "ui_drive":
         await query.edit_message_text("☁️ Drive: /drive • /search • /download")
     elif query.data == "ui_vault":
@@ -105,7 +106,7 @@ async def run_bot() -> None:
     sandbox = SandboxStorage(config.SANDBOX_PATH)
     store = MemoryStore(config.MEMORY_DB_PATH)
     semantic_index = SemanticIndex(config.MEMORY_DB_PATH)
-    memory = MemoryService(store, semantic_index)
+    memory = SecureMemory(MemoryService(store, semantic_index))
     serial_store = SerialMapStore(ttl_seconds=config.SERIAL_MAP_TTL_SECONDS, db_path=config.MEMORY_DB_PATH)
 
     drive = None
