@@ -9,7 +9,6 @@ from flask import Flask, jsonify
 from waitress import serve
 from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
-from langchain_groq import ChatGroq
 
 from bot import config
 from bot.agent.chat_agent import build_llm
@@ -24,6 +23,7 @@ from bot.infra.memory import MemoryStore
 from bot.infra.sandbox import SandboxStorage
 from bot.infra.serial_map import SerialMapStore
 from bot.infra.rag_mcp import RAGMCPClient
+from bot.domain.drive_service import DriveService
 from bot.domain.memory_service import MemoryService
 from bot.domain.semantic_index import SemanticIndex
 from bot.domain.secure_memory import SecureMemory
