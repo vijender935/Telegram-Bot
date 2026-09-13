@@ -188,6 +188,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.exception("learning extraction failed user=%s", uid)
 
     try:
-        maybe_update_session_summary(memory, uid)
+        await maybe_update_session_summary(llm, memory, uid, user_text, clean_reply)
     except Exception:
         logger.exception("session summary update failed user=%s", uid)
