@@ -27,6 +27,7 @@ PORT = int(os.getenv("PORT", "8080"))
 
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
 GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b").strip()
+GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "1200"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 
 _allow = os.getenv("ALLOWED_USER_IDS", "").strip()
@@ -34,6 +35,7 @@ ALLOWED_USER_IDS: set[int] = {int(x) for x in _allow.split(",") if x.strip().isd
 
 SERIAL_MAP_TTL_SECONDS = int(os.getenv("SERIAL_MAP_TTL_SECONDS", str(30 * 60)))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
+LLM_HISTORY_MESSAGES = int(os.getenv("LLM_HISTORY_MESSAGES", "8"))
 MAX_SEND_MB = int(os.getenv("MAX_SEND_MB", "48"))
 SESSION_SUMMARY_EVERY = int(os.getenv("SESSION_SUMMARY_EVERY", "8"))
 MEDIA_DESCRIBE_ON_DOWNLOAD = os.getenv("MEDIA_DESCRIBE_ON_DOWNLOAD", "true").lower() in ("1", "true", "yes")
@@ -69,6 +71,10 @@ def validate_startup(require_drive: bool = False) -> None:
         raise ConfigurationError("Missing required environment variables: " + ", ".join(missing))
     if not 0 <= TEMPERATURE <= 2:
         raise ConfigurationError("TEMPERATURE must be between 0 and 2")
+    if GROQ_MAX_TOKENS < 256 or GROQ_MAX_TOKENS > 4096:
+        raise ConfigurationError("GROQ_MAX_TOKENS must be between 256 and 4096")
+    if LLM_HISTORY_MESSAGES < 0 or LLM_HISTORY_MESSAGES > MAX_HISTORY_MESSAGES:
+        raise ConfigurationError("LLM_HISTORY_MESSAGES must be between 0 and MAX_HISTORY_MESSAGES")
     if RAG_MCP_MODE not in {"metadata", "visual", "hybrid"}:
         raise ConfigurationError("RAG_MCP_MODE must be metadata, visual or hybrid")
     if RAG_MCP_TOP_K < 1 or RAG_MCP_TOP_K > 30:
