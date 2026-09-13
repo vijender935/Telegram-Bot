@@ -4,7 +4,7 @@ from telegram.ext import ContextTypes
 from bot.domain.mood import MOODS, MOOD_MAP
 from bot.domain.learning import profile_to_prompt_text
 from bot.gateway.base import _allowed
-from bot.gateway.ui import home_text, home_keyboard
+from bot.gateway.ui import home_text, home_keyboard, settings_text
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,17 @@ async def cmd_fullreset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     memory = context.application.bot_data["memory"]
     memory.clear_all_for_user(update.effective_user.id)
     await update.message.reply_text("♻️ User data reset complete: history, profile, mood, memory aur vault metadata.")
+
+
+async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    keyboard = [
+        [InlineKeyboardButton("🧹 Clear chat history", callback_data="set_clear")],
+        [InlineKeyboardButton("👤 Profile", callback_data="set_profile"), InlineKeyboardButton("🎭 Mood", callback_data="set_mood")],
+        [InlineKeyboardButton("♻️ Reset user data", callback_data="set_reset")],
+    ]
+    await update.message.reply_text(settings_text(), reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def cmd_mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
