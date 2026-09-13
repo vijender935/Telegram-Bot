@@ -5,6 +5,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from bot import config
 from bot.agent.prompts import SYSTEM_PROMPT
 from bot.domain.learning import profile_to_prompt_text
 
@@ -51,3 +52,18 @@ def build_chat_agent(
     ])
     model = llm.bind_tools(tools) if tools else llm
     return prompt | model
+
+
+def build_llm(model_name: str | None = None) -> ChatGroq:
+    """Create the Groq client with an explicit completion budget.
+
+    Groq's on-demand tier enforces a tokens-per-minute request budget. Keeping
+    the completion cap bounded prevents a valid conversation context from
+    becoming a 413 when the default model output budget is too large.
+    """
+    return ChatGroq(
+        model=model_name or config.GROQ_MODEL,
+        groq_api_key=config.GROQ_API_KEY,
+        temperature=config.TEMPERATURE,
+        max_tokens=config.GROQ_MAX_TOKENS,
+    )
