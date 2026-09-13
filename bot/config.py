@@ -25,7 +25,7 @@ SANDBOX_PATH = os.getenv("SANDBOX_PATH", "/var/data/bot_files" if os.path.isdir(
 MEMORY_DB_PATH = os.getenv("MEMORY_DB_PATH", "/var/data/bot_memory.db" if os.path.isdir("/var/data") else "/tmp/bot_memory.db")
 PORT = int(os.getenv("PORT", "8080"))
 
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
 GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b").strip()
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "1200"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
