@@ -65,6 +65,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     ctx = build_context_packet(memory, uid, user_text=user_text)
     history = memory.get_history(uid)
+    llm_history = history[-config.LLM_HISTORY_MESSAGES:] if config.LLM_HISTORY_MESSAGES else []
     response_policy = infer_response_policy(user_text, ctx["profile"])
     tools = build_tools(
         memory=memory,
@@ -83,7 +84,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     try:
-        response = await chain.ainvoke({"input": user_text, "chat_history": history})
+        response = await chain.ainvoke({"input": user_text, "chat_history": llm_history})
         for _ in range(2):
             tool_calls = getattr(response, "tool_calls", None) or []
             if not tool_calls:
@@ -107,7 +108,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                     ))
             response = await chain.ainvoke({
                 "input": user_text,
-                "chat_history": history + [response] + tool_messages,
+                "chat_history": llm_history + [response] + tool_messages,
             })
 
         full_reply = getattr(response, "content", None) or str(response)
@@ -179,23 +180,14 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                 memory.set_profile(uid, profile)
         except Exception:
             logger.exception("action failed tag=%s user=%s", tag, uid)
-            await update.message.reply_text("Ye action complete nahi ho paaya, lekin upar wala reply valid hai.")
-
-    try:
-        remember = getattr(memory, "remember", None)
-        if remember:
-            remember(uid, f"User: {user_text}\nAssistant: {clean_reply}", importance=0.55)
-    except Exception:
-        logger.exception("episodic memory indexing failed user=%s", uid)
 
     try:
         if should_extract(user_text):
-            profile = await extract_and_merge(llm, ctx["profile"], user_text, clean_reply)
-            memory.set_profile(uid, profile)
+            extract_and_merge(memory, uid, user_text, clean_reply)
     except Exception:
-        logger.exception("profile learning side effect failed user=%s", uid)
+        logger.exception("learning extraction failed user=%s", uid)
 
     try:
-        await maybe_update_session_summary(llm, memory, uid, user_text, clean_reply)
+        maybe_update_session_summary(memory, uid)
     except Exception:
-        logger.exception("session summary side effect failed user=%s", uid)
+        logger.exception("session summary update failed user=%s", uid)
