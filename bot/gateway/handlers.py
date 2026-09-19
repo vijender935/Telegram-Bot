@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 from collections import defaultdict
 
 from telegram import Update
@@ -9,7 +8,7 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from bot import config
 from bot.gateway.base import _allowed
-from bot.gateway.formatters import send_long_text, send_local_file
+from bot.gateway.formatters import send_long_text
 from bot.domain.orchestrator import build_context_packet, maybe_update_session_summary
 from bot.domain.learning import should_extract, extract_and_merge
 from bot.agent.chat_agent import build_chat_agent
@@ -25,22 +24,53 @@ from bot.gateway.vault import *
 logger = logging.getLogger(__name__)
 _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-_IMAGE_REQUEST_RE = re.compile(
-    r"\b(?:show|send|display|fetch|find|get|give|search|dikhao|dikha|bhejo|bhej|dhoondo|dhundho|lao|la|chahiye|do)\b.*"
-    r"\b(?:image|images|photo|photos|pic|pics|picture|pictures|tasveer|tasveer?e|photo+|image+|wallpaper)\b|"
-    r"\b(?:image|images|photo|photos|pic|pics|picture|pictures|tasveer|wallpaper)\b.*"
-    r"\b(?:show|send|display|fetch|find|get|give|search|dikhao|dikha|bhejo|bhej|dhoondo|dhundho|lao|la|chahiye|do)\b",
-    re.IGNORECASE,
-)
-_LINK_REQUEST_RE = re.compile(
-    r"\b(?:link|url|https?://|preview|shareable|share\s+link)\b",
-    re.IGNORECASE,
-)
+
+def _tool_result_text(result: object, image_count: int = 0) -> str:
+    """Keep MCP image bytes out of the LLM context while preserving useful text."""
+    if isinstance(result, (list, tuple)):
+        parts = []
+        for item in result:
+            if isinstance(item, dict) and item.get("type") == "image":
+                continue
+            if getattr(item, "type", None) == "image":
+                continue
+            parts.append(_tool_result_text(item, image_count=0))
+        text = "
+".join(x for x in parts if x)
+    elif isinstance(result, dict):
+        safe = {
+            k: v for k, v in result.items()
+            if k not in {"data"} or result.get("type") != "image"
+        }
+        text = str(safe)
+    else:
+        text = str(result)
+
+    if image_count:
+        text = (text + "\n" if text else "") + f"{image_count} image(s) retrieved and sent to the user."
+    return text[:4000]
 
 
-def _wants_rag_image_media(text: str) -> bool:
-    """Return True for image-display requests, but not explicit link requests."""
-    return bool(_IMAGE_REQUEST_RE.search(text)) and not bool(_LINK_REQUEST_RE.search(text))
+async def _send_mcp_images(update: Update, images: list[tuple[bytes, str]]) -> int:
+    """Send image content returned by the custom Cloudflare MCP directly to Telegram."""
+    sent = 0
+    for index, (data, mime_type) in enumerate(images, start=1):
+        if not data:
+            continue
+        ext = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+            "image/gif": ".gif",
+            "image/bmp": ".bmp",
+        }.get(mime_type.lower(), ".jpg")
+        filename = f"cloudflare_image_{index}{ext}"
+        if len(data) <= 10 * 1024 * 1024 and mime_type.lower().startswith("image/"):
+            await update.message.reply_photo(photo=data, filename=filename)
+        else:
+            await update.message.reply_document(document=data, filename=filename)
+        sent += 1
+    return sent
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -59,9 +89,8 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_text = update.message.text or ""
     memory = context.application.bot_data["memory"]
     llm = context.application.bot_data["llm"]
-    drive = context.application.bot_data.get("drive")
-    rag_tools = context.application.bot_data.get("rag_tools", [])
-    rag_mcp = context.application.bot_data.get("rag_mcp")
+    cloudflare_mcp = context.application.bot_data.get("cloudflare_mcp")
+    mcp_tools = context.application.bot_data.get("mcp_tools", [])
 
     ctx = build_context_packet(memory, uid, user_text=user_text)
     history = memory.get_history(uid)
@@ -69,10 +98,9 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     response_policy = infer_response_policy(user_text, ctx["profile"])
     tools = build_tools(
         memory=memory,
-        drive=drive,
         user_id=uid,
         sandbox_path=config.SANDBOX_PATH,
-        mcp_tools=rag_tools,
+        mcp_tools=mcp_tools,
     )
     chain = build_chat_agent(
         llm, tools,
@@ -99,7 +127,23 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                     continue
                 try:
                     result = await tool.ainvoke(call.get("args", {}))
-                    tool_messages.append(ToolMessage(content=str(result)[:4000], tool_call_id=call.get("id", "unknown")))
+                    image_count = 0
+                    if cloudflare_mcp:
+                        images = cloudflare_mcp.extract_images(result)
+                        if images:
+                            image_count = await _send_mcp_images(update, images)
+                            logger.info(
+                                "sent %s MCP image(s) directly to Telegram tool=%s user=%s",
+                                image_count,
+                                call.get("name"),
+                                uid,
+                            )
+                    tool_messages.append(
+                        ToolMessage(
+                            content=_tool_result_text(result, image_count),
+                            tool_call_id=call.get("id", "unknown"),
+                        )
+                    )
                 except Exception as exc:
                     logger.exception("tool execution failed name=%s user=%s", call.get("name"), uid)
                     tool_messages.append(ToolMessage(
@@ -114,14 +158,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
         full_reply = getattr(response, "content", None) or str(response)
         clean_reply, actions = parse_action_tags(full_reply)
         clean_reply = clean_reply.strip()
-
-        # Deterministic media guard: for an image-display request, the bot must
-        # send the indexed image instead of merely returning a Drive URL. The
-        # LLM can still use get_image_link when the user explicitly asks for a link.
-        if _wants_rag_image_media(user_text) and rag_mcp and rag_mcp.available:
-            if not any(tag == "RAG_SEND_MEDIA" for tag, _ in actions):
-                actions.append(("RAG_SEND_MEDIA", user_text))
-                logger.info("forced RAG media action for image request user=%s", uid)
     except BotError:
         logger.exception("conversation generation failed user=%s", uid)
         await update.message.reply_text("Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo.")
@@ -153,23 +189,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
             elif tag == "VAULT_OPEN":
                 context.args = [val] if val else []
                 await cmd_vault_open(update, context)
-            elif tag in ("SEND_MEDIA", "DRIVE_GET"):
-                if drive and val:
-                    await update.message.reply_text("🔎 Search kar rahi hoon…")
-                    status, msg = drive.semantic_download(uid, val, config.SANDBOX_PATH)
-                    if status == "ok":
-                        from bot.gateway.media import _send_media_with_followup
-                        await _send_media_with_followup(update, context, msg, uid)
-                    else:
-                        await update.message.reply_text(msg)
-            elif tag == "RAG_SEND_MEDIA":
-                rag_mcp = context.application.bot_data.get("rag_mcp")
-                if not rag_mcp or not rag_mcp.available or not val:
-                    await update.message.reply_text("RAG image search abhi available nahi hai.")
-                else:
-                    await update.message.reply_text("🧠 Indexed images mein search kar rahi hoon…")
-                    path = await rag_mcp.download_top_image(val, config.SANDBOX_PATH)
-                    await send_local_file(update, path)
             elif tag == "SET_EMOTION" and val:
                 memory.set_emotion(uid, val.lower()[:40])
             elif tag == "EVOLVE" and val:

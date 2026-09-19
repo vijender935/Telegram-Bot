@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage
 
 from bot import config
-from bot.gateway.base import _allowed, _get_drive
+from bot.gateway.base import _allowed
 from bot.gateway.formatters import send_long_text, send_local_file
 from bot.infra.transcribe import transcribe_audio
 from bot.infra.media_describe import describe_media_path, is_image, is_video
@@ -17,83 +17,6 @@ from bot.agent.tools import build_tools
 from bot.infra.image_enhance import enhance_image, EnhanceMode
 
 logger = logging.getLogger(__name__)
-
-# --- Drive Commands ---
-
-async def cmd_drive(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    drive = _get_drive(context)
-    if not drive:
-        await update.message.reply_text("Abhi files nahi khol pa rahi.")
-        return
-    text = drive.list_files(update.effective_user.id, "root")
-    await send_long_text(update, text)
-
-async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    drive = _get_drive(context)
-    if not drive:
-        await update.message.reply_text("Abhi files nahi khol pa rahi.")
-        return
-    sub = " ".join(context.args) if context.args else "root"
-    text = drive.list_files(update.effective_user.id, sub)
-    await send_long_text(update, text)
-
-async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /download <number>\nPehle /drive chalao.")
-        return
-    await _do_download(update, context, int(context.args[0]))
-
-async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    if not context.args:
-        await update.message.reply_text("Usage: /search <query>")
-        return
-    drive = _get_drive(context)
-    if not drive:
-        await update.message.reply_text("Abhi files nahi khol pa rahi.")
-        return
-    await send_long_text(update, drive.search(" ".join(context.args)))
-
-async def cmd_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    sandbox = context.application.bot_data["sandbox"]
-    drive = _get_drive(context)
-    if not drive:
-        await update.message.reply_text("Abhi files nahi khol pa rahi.")
-        return
-    if not context.args:
-        await update.message.reply_text("Usage: /upload <local_filename>")
-        return
-    path = sandbox.path_for(context.args[0])
-    if not path.exists():
-        await update.message.reply_text(f"Local file nahi mili: {context.args[0]}")
-        return
-    try:
-        name = drive.upload(path)
-        await update.message.reply_text(f"Upload → {name}")
-    except Exception as e:
-        await update.message.reply_text(f"Upload fail: {e}")
-
-async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    sandbox = context.application.bot_data["sandbox"]
-    if not context.args:
-        await update.message.reply_text("Usage: /delete <filename>")
-        return
-    try:
-        sandbox.delete(context.args[0])
-        await update.message.reply_text(f"Deleted: {context.args[0]}")
-    except Exception as e:
-        await update.message.reply_text(str(e))
 
 async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
@@ -267,7 +190,6 @@ async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
 FILE_ACTIONS = [
     ("📝 Transcribe", "fileact_transcribe"),
     ("💾 Save local", "fileact_save"),
-    ("☁️ Upload Drive", "fileact_upload"),
     ("❌ Skip", "fileact_skip"),
 ]
 
@@ -287,7 +209,6 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     name = pending["name"]
     sandbox = context.application.bot_data["sandbox"]
-    drive = _get_drive(context)
     path = sandbox.path_for(name)
     action = query.data
     if action == "fileact_skip":
@@ -298,17 +219,6 @@ async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "fileact_save":
         context.user_data.pop("pending_file", None)
         await query.edit_message_text(f"Saved local: `{name}`", parse_mode="Markdown")
-        return
-    if action == "fileact_upload":
-        if not drive:
-            await query.edit_message_text("Abhi files nahi khol pa rahi.")
-            return
-        try:
-            up = drive.upload(path)
-            context.user_data.pop("pending_file", None)
-            await query.edit_message_text(f"☁️ Drive pe: {up}")
-        except Exception as e:
-            await query.edit_message_text(f"Upload fail: {e}")
         return
     if action == "fileact_transcribe":
         groq_key = context.application.bot_data.get("groq_api_key")
@@ -415,19 +325,6 @@ async def _send_media_with_followup(update: Update, context: ContextTypes.DEFAUL
     path = sandbox.path_for(filename)
     await send_local_file(update, path)
 
-async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, serial: int, subfolder: str = "root"):
-    drive = _get_drive(context)
-    if not drive:
-        await update.message.reply_text("Abhi files nahi khol pa rahi.")
-        return
-    sandbox = context.application.bot_data["sandbox"]
-    await update.message.reply_text("ruki…")
-    status, msg = drive.download_by_serial(update.effective_user.id, serial, sandbox.root, subfolder=subfolder)
-    if status != "ok":
-        await update.message.reply_text(msg)
-        return
-    await _send_media_with_followup(update, context, msg, update.effective_user.id)
-
 async def _transcribe_and_reply(update, context, file_bytes, filename, label):
     memory = context.application.bot_data["memory"]
     groq_key = context.application.bot_data.get("groq_api_key")
@@ -444,8 +341,7 @@ async def _transcribe_and_reply(update, context, file_bytes, filename, label):
         except Exception:
             pass
         llm = context.application.bot_data["llm"]
-        drive = context.application.bot_data.get("drive")
-        tools = build_tools(memory=memory, drive=drive, user_id=uid, sandbox_path=config.SANDBOX_PATH)
+        tools = build_tools(memory=memory, user_id=uid, sandbox_path=config.SANDBOX_PATH, mcp_tools=context.application.bot_data.get("mcp_tools", []))
         ctx = build_context_packet(memory, uid, user_text=preview)
         chain = build_chat_agent(
             llm, tools,

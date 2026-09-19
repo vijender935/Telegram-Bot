@@ -15,8 +15,6 @@ load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GOOGLE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
-GOOGLE_SA_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
 
 HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "").strip()
@@ -47,26 +45,24 @@ VAULT_LOCKOUT_SECONDS = int(os.getenv("VAULT_LOCKOUT_SECONDS", "900"))
 VAULT_SESSION_SECONDS = int(os.getenv("VAULT_SESSION_SECONDS", "900"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
-RAG_MCP_URL = os.getenv(
-    "RAG_MCP_URL",
-    "https://vijender935--multimodal-rag-search-mcp-app.modal.run/mcp",
+# User-owned custom Cloudflare MCP only.
+# It exposes the ai-images-pilot Worker through R2 + D1 + Vectorize.
+CLOUDFLARE_MCP_URL = os.getenv(
+    "CLOUDFLARE_MCP_URL",
+    "https://cloudflare-mcp.vijender935.workers.dev/mcp",
 ).strip()
-RAG_MCP_API_KEY = os.getenv("RAG_MCP_API_KEY", "").strip()
-RAG_MCP_TIMEOUT_SECONDS = float(os.getenv("RAG_MCP_TIMEOUT_SECONDS", "20"))
-RAG_MCP_TOP_K = int(os.getenv("RAG_MCP_TOP_K", "5"))
-RAG_MCP_MODE = os.getenv("RAG_MCP_MODE", "hybrid").strip().lower()
-RAG_MCP_RETRIES = int(os.getenv("RAG_MCP_RETRIES", "3"))
-RAG_MCP_ENABLED = os.getenv("RAG_MCP_ENABLED", "true").lower() in ("1", "true", "yes")
+CLOUDFLARE_MCP_API_KEY = os.getenv("CLOUDFLARE_MCP_API_KEY", "").strip()
+CLOUDFLARE_MCP_TIMEOUT_SECONDS = float(os.getenv("CLOUDFLARE_MCP_TIMEOUT_SECONDS", "30"))
+CLOUDFLARE_MCP_RETRIES = int(os.getenv("CLOUDFLARE_MCP_RETRIES", "3"))
+CLOUDFLARE_MCP_ENABLED = os.getenv("CLOUDFLARE_MCP_ENABLED", "true").lower() in ("1", "true", "yes")
 
 
-def validate_startup(require_drive: bool = False) -> None:
+def validate_startup() -> None:
     missing = []
     if not TELEGRAM_TOKEN:
         missing.append("TELEGRAM_BOT_TOKEN")
     if not GROQ_API_KEY:
         missing.append("GROQ_API_KEY")
-    if require_drive and (not GOOGLE_FOLDER_ID or not GOOGLE_SA_JSON):
-        missing.append("GOOGLE_DRIVE_FOLDER_ID/GOOGLE_SERVICE_ACCOUNT_JSON")
     if missing:
         raise ConfigurationError("Missing required environment variables: " + ", ".join(missing))
     if not 0 <= TEMPERATURE <= 2:
@@ -75,11 +71,9 @@ def validate_startup(require_drive: bool = False) -> None:
         raise ConfigurationError("GROQ_MAX_TOKENS must be between 256 and 4096")
     if LLM_HISTORY_MESSAGES < 0 or LLM_HISTORY_MESSAGES > MAX_HISTORY_MESSAGES:
         raise ConfigurationError("LLM_HISTORY_MESSAGES must be between 0 and MAX_HISTORY_MESSAGES")
-    if RAG_MCP_MODE not in {"metadata", "visual", "hybrid"}:
-        raise ConfigurationError("RAG_MCP_MODE must be metadata, visual or hybrid")
-    if RAG_MCP_TOP_K < 1 or RAG_MCP_TOP_K > 30:
-        raise ConfigurationError("RAG_MCP_TOP_K must be between 1 and 30")
-    if RAG_MCP_RETRIES < 1 or RAG_MCP_RETRIES > 5:
-        raise ConfigurationError("RAG_MCP_RETRIES must be between 1 and 5")
+    if CLOUDFLARE_MCP_RETRIES < 1 or CLOUDFLARE_MCP_RETRIES > 5:
+        raise ConfigurationError("CLOUDFLARE_MCP_RETRIES must be between 1 and 5")
+    if CLOUDFLARE_MCP_TIMEOUT_SECONDS < 3 or CLOUDFLARE_MCP_TIMEOUT_SECONDS > 120:
+        raise ConfigurationError("CLOUDFLARE_MCP_TIMEOUT_SECONDS must be between 3 and 120")
     Path(MEMORY_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     Path(SANDBOX_PATH).mkdir(parents=True, exist_ok=True)
