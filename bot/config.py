@@ -56,6 +56,11 @@ CLOUDFLARE_MCP_TIMEOUT_SECONDS = float(os.getenv("CLOUDFLARE_MCP_TIMEOUT_SECONDS
 CLOUDFLARE_MCP_RETRIES = int(os.getenv("CLOUDFLARE_MCP_RETRIES", "3"))
 CLOUDFLARE_MCP_ENABLED = os.getenv("CLOUDFLARE_MCP_ENABLED", "true").lower() in ("1", "true", "yes")
 
+# Render-safe Telegram webhook. Polling is intentionally disabled because Render's
+# zero-downtime deploys briefly run old and new instances side-by-side.
+TELEGRAM_WEBHOOK_URL = os.getenv("TELEGRAM_WEBHOOK_URL", "https://telegram-bot-hnzl.onrender.com").rstrip("/")
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
+
 
 def validate_startup() -> None:
     missing = []
@@ -73,6 +78,10 @@ def validate_startup() -> None:
         raise ConfigurationError("LLM_HISTORY_MESSAGES must be between 0 and MAX_HISTORY_MESSAGES")
     if CLOUDFLARE_MCP_RETRIES < 1 or CLOUDFLARE_MCP_RETRIES > 5:
         raise ConfigurationError("CLOUDFLARE_MCP_RETRIES must be between 1 and 5")
+    if not TELEGRAM_WEBHOOK_URL.startswith("https://"):
+        raise ConfigurationError("TELEGRAM_WEBHOOK_URL must be an HTTPS URL")
+    if not TELEGRAM_WEBHOOK_SECRET:
+        raise ConfigurationError("Missing required environment variable: TELEGRAM_WEBHOOK_SECRET")
     if CLOUDFLARE_MCP_TIMEOUT_SECONDS < 3 or CLOUDFLARE_MCP_TIMEOUT_SECONDS > 120:
         raise ConfigurationError("CLOUDFLARE_MCP_TIMEOUT_SECONDS must be between 3 and 120")
     Path(MEMORY_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
