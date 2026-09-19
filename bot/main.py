@@ -8,16 +8,22 @@ from pathlib import Path
 from flask import Flask, jsonify
 from waitress import serve
 from telegram import Update
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import CommandHandler, ContextTypes, Application, MessageHandler, filters
 
 from bot import config
 from bot.agent.chat_agent import build_llm
 from bot.core.health import check_health
 from bot.core.logging import configure_logging
-from bot.gateway.commands import *
+from bot.gateway.commands import cmd_start
 from bot.gateway.handlers import handle_text
-from bot.gateway.media import *
-from bot.gateway.vault import *
+from bot.gateway.media import (
+    handle_audio,
+    handle_document,
+    handle_photo,
+    handle_video,
+    handle_video_note,
+    handle_voice,
+)
 from bot.infra.memory import MemoryStore
 from bot.infra.sandbox import SandboxStorage
 from bot.infra.serial_map import SerialMapStore
@@ -26,7 +32,6 @@ from bot.domain.memory_service import MemoryService
 from bot.domain.semantic_index import SemanticIndex
 from bot.domain.secure_memory import SecureMemory
 from bot.core.rate_limit import SlidingWindowRateLimiter
-from bot.core.vault_guard import VaultGuard
 from bot.scheduler import start_scheduler
 
 configure_logging(config.LOG_LEVEL)
@@ -64,40 +69,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.effective_message.reply_text("Temporary error aa gaya. Dobara try karo.")
 
 
-async def ui_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    if query.data == "ui_mood":
-        await cmd_mood(update, context)
-    elif query.data == "ui_profile":
-        await query.edit_message_text("👤 Profile: /profile")
-    elif query.data == "ui_settings":
-        await query.edit_message_text("⚙️ Settings: /settings")
-    elif query.data == "ui_vault":
-        await query.edit_message_text("🔐 Vault: /vault_setcode • /vault_list • /vault_open")
-    elif query.data == "ui_voice":
-        await query.edit_message_text("🎙 Last reply ke liye /voice use karo.")
-    elif query.data == "ui_memory":
-        await query.edit_message_text("🧠 Memory active hai. /clear sirf chat history clear karta hai.")
-
-
-async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    memory = context.application.bot_data["memory"]
-    uid = query.from_user.id
-    if query.data == "set_clear":
-        memory.clear_history(uid)
-        await query.edit_message_text("🧠 Chat history clear ho gayi. Profile safe hai.")
-    elif query.data == "set_profile":
-        await query.edit_message_text("👤 Profile: /profile")
-    elif query.data == "set_mood":
-        await query.edit_message_text("🎭 Mood: /mood")
-    elif query.data == "set_reset":
-        memory.clear_all_for_user(uid)
-        await query.edit_message_text("♻️ User data reset complete.")
-
-
 async def run_bot() -> None:
     config.validate_startup()
     Path(config.SANDBOX_PATH).mkdir(parents=True, exist_ok=True)
@@ -131,29 +102,10 @@ async def run_bot() -> None:
         "llm": llm,
         "groq_api_key": config.GROQ_API_KEY,
         "rate_limiter": SlidingWindowRateLimiter(config.RATE_LIMIT_PER_MINUTE, 60),
-        "vault_guard": VaultGuard(config.VAULT_MAX_ATTEMPTS, config.VAULT_LOCKOUT_SECONDS),
     })
 
     handlers = [
         CommandHandler("start", cmd_start),
-        CommandHandler("clear", cmd_clear),
-        CommandHandler("profile", cmd_profile),
-        CommandHandler("forgetprofile", cmd_forgetprofile),
-        CommandHandler("fullreset", cmd_fullreset),
-        CommandHandler("mood", cmd_mood),
-        CommandHandler("settings", cmd_settings),
-        CommandHandler("voice", cmd_voice),
-        CommandHandler("vault_setcode", cmd_vault_setcode),
-        CommandHandler("vault_add", cmd_vault_add),
-        CommandHandler("vault_list", cmd_vault_list),
-        CommandHandler("vault_open", cmd_vault_open),
-        CommandHandler("vault_del", cmd_vault_del),
-        CommandHandler("enhance", cmd_enhance),
-        CallbackQueryHandler(mood_callback, pattern="^mood_"),
-        CallbackQueryHandler(file_action_callback, pattern="^fileact_"),
-        CallbackQueryHandler(enhance_callback, pattern="^enhance_"),
-        CallbackQueryHandler(ui_callback, pattern="^ui_"),
-        CallbackQueryHandler(settings_callback, pattern="^set_"),
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
         MessageHandler(filters.Document.ALL, handle_document),
         MessageHandler(filters.PHOTO, handle_photo),

@@ -79,13 +79,16 @@ No Google Drive credentials are required by the bot.
 
 ## Telegram UX
 
-Image/data operations are handled through normal language. Examples:
+The Telegram interface is prompt-first. There is no feature button grid, Drive menu, Vault/Profile/Mood/Settings menu, or legacy action-tag interface.
+
+Use normal language, for example:
 - Summer street style wali image dikhao
 - Latest ready images dikhao
 - R2 mein kya pada hai?
 - Next pending image process karo
+- Is image ko process karo
 
-The legacy Google Drive command surface is no longer registered.
+
 
 ## Migration status
 

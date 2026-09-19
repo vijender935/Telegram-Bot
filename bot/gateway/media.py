@@ -1,7 +1,7 @@
 import logging
 import io
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -185,122 +185,16 @@ async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("video_note download failed")
         await update.message.reply_text("Video note fail.")
 
-# --- Callbacks ---
-
-FILE_ACTIONS = [
-    ("📝 Transcribe", "fileact_transcribe"),
-    ("💾 Save local", "fileact_save"),
-    ("❌ Skip", "fileact_skip"),
-]
-
-async def _ask_file_method(update: Update, context: ContextTypes.DEFAULT_TYPE, local_name: str, kind: str):
-    context.user_data["pending_file"] = {"name": local_name, "kind": kind}
-    keyboard = [[InlineKeyboardButton(t, callback_data=d)] for t, d in FILE_ACTIONS]
-    await update.message.reply_text(f"File '{local_name}' mili. Kya karun?", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def file_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if not _allowed(query.from_user.id):
-        return
-    pending = context.user_data.get("pending_file")
-    if not pending:
-        await query.edit_message_text("Koi pending file nahi.")
-        return
-    name = pending["name"]
-    sandbox = context.application.bot_data["sandbox"]
-    path = sandbox.path_for(name)
-    action = query.data
-    if action == "fileact_skip":
-        path.unlink(missing_ok=True)
-        context.user_data.pop("pending_file", None)
-        await query.edit_message_text("Skip 👍")
-        return
-    if action == "fileact_save":
-        context.user_data.pop("pending_file", None)
-        await query.edit_message_text(f"Saved local: `{name}`", parse_mode="Markdown")
-        return
-    if action == "fileact_transcribe":
-        groq_key = context.application.bot_data.get("groq_api_key")
-        await query.edit_message_text("🎧 Transcript bana rahi hoon…")
-        try:
-            data = path.read_bytes()
-            low = name.lower()
-            if low.endswith((".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v")):
-                from bot.infra.transcribe import extract_audio_from_video
-                data = extract_audio_from_video(data)
-                fname = "audio.mp3"
-            else:
-                fname = name
-            transcript = await transcribe_audio(data, fname, groq_key)
-            memory = context.application.bot_data["memory"]
-            h = memory.get_history(query.from_user.id)
-            preview = transcript if len(transcript) <= 1500 else transcript[:1500] + "…"
-            h.append(HumanMessage(content=f"[file:{name}]\nTranscript: {preview}"))
-            memory.save_history(query.from_user.id, h, config.MAX_HISTORY_MESSAGES)
-            context.user_data.pop("pending_file", None)
-            await query.edit_message_text("📝 Transcript ready:")
-            await send_long_text(update, transcript)
-        except Exception as e:
-            logger.exception("fileact transcribe")
-            await query.edit_message_text(f"Fail: {str(e)[:200]}")
-
-# --- Image Enhancement ---
-
-ENHANCE_ACTIONS = [
-    ("🎨 AI Enhance (FREE)", "enhance_regen"),
-    ("❌ Skip", "enhance_skip"),
-]
+# --- Internal Helpers ---
 
 async def _ask_enhance_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, local_name: str):
+    """Keep enhancement prompt-driven; never render an action keyboard."""
     context.user_data["enhance_file"] = local_name
-    keyboard = [[InlineKeyboardButton(t, callback_data=d)] for t, d in ENHANCE_ACTIONS]
-    await update.message.reply_text("Photo mili. Enhance karein?", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        "Photo mil gayi. Agar enhance karna hai to normal language mein bolo, "
+        "jaise: 'is photo ko enhance karo'."
+    )
 
-async def cmd_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    pending = context.user_data.get("enhance_file")
-    if not pending:
-        await update.message.reply_text("Pehle ek photo bhejo, phir /enhance use karo. 📸")
-        return
-    await _ask_enhance_mode(update, context, pending)
-
-async def enhance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if not _allowed(query.from_user.id):
-        return
-    action = query.data
-    if action == "enhance_skip":
-        context.user_data.pop("enhance_file", None)
-        await query.edit_message_text("Skip 👍")
-        return
-    local_name = context.user_data.get("enhance_file")
-    sandbox = context.application.bot_data["sandbox"]
-    path = sandbox.path_for(local_name)
-    if not path.exists():
-        await query.edit_message_text("File missing — dubara bhejo.")
-        return
-    await query.edit_message_text("🎨 AI Enhancement shuru ho raha hai… ⏳")
-    try:
-        image_bytes = path.read_bytes()
-        enhanced_bytes, description = await enhance_image(image_bytes, mode=EnhanceMode.REGENERATE)
-        uid = query.from_user.id
-        memory = context.application.bot_data["memory"]
-        output_name = f"enhanced_{local_name}"
-        output_path = sandbox.path_for(output_name)
-        output_path.write_bytes(enhanced_bytes)
-        await context.bot.send_photo(chat_id=query.message.chat_id, photo=enhanced_bytes, caption=f"✅ {description}")
-        h = memory.get_history(uid)
-        h.append(AIMessage(content=f"[Enhanced image bheji]\n{description}"))
-        memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
-        context.user_data.pop("enhance_file", None)
-    except Exception as e:
-        logger.exception("enhance failed")
-        await query.edit_message_text(f"Enhancement fail 😤\n{str(e)[:250]}")
-
-# --- Internal Helpers ---
 
 async def _describe_and_remember(context, uid: int, local_name: str, file_id: str | None = None) -> str:
     if not config.MEDIA_DESCRIBE_ON_DOWNLOAD:

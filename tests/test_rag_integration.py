@@ -18,10 +18,10 @@ def test_cloudflare_mcp_tools_are_exposed_without_replacing_existing_tools():
     assert [tool.name for tool in tools] == ["search_images"]
 
 
-def test_local_action_tags_remain_supported():
+def test_legacy_action_tags_are_not_required_for_normal_responses():
     clean, actions = parse_action_tags("Done [SET_EMOTION: happy]")
-    assert clean == "Done"
-    assert actions == [("SET_EMOTION", "happy")]
+    assert clean == "Done [SET_EMOTION: happy]"
+    assert actions == []
 
 
 def test_cloudflare_mcp_extracts_wrapped_image_content():
