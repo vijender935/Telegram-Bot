@@ -14,7 +14,6 @@ from bot.infra.tts import generate_voice_note
 from bot.domain.orchestrator import build_context_packet, media_followup_lines
 from bot.agent.chat_agent import build_chat_agent
 from bot.agent.tools import build_tools
-from bot.infra.image_enhance import enhance_image, EnhanceMode
 
 logger = logging.getLogger(__name__)
 

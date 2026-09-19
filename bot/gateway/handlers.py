@@ -17,14 +17,6 @@ from bot.agent.chat_agent import build_chat_agent
 from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
-from bot.gateway.media import (
-    handle_audio,
-    handle_document,
-    handle_photo,
-    handle_video,
-    handle_video_note,
-    handle_voice,
-)
 
 logger = logging.getLogger(__name__)
 _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
