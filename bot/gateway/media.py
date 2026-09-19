@@ -110,7 +110,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             h = memory.get_history(uid)
             h.append(HumanMessage(content=f"[document: {name}]"))
             memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
-            await _ask_file_method(update, context, name, "document")
+            await update.message.reply_text("File mil gayi. Batao normal language mein kya karna hai.")
     except Exception:
         logger.exception("document failed")
         await update.message.reply_text("Document fail.")
