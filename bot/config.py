@@ -30,6 +30,8 @@ TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 
 _allow = os.getenv("ALLOWED_USER_IDS", "").strip()
 ALLOWED_USER_IDS: set[int] = {int(x) for x in _allow.split(",") if x.strip().isdigit()}
+# Single-user mode: exactly one Telegram account is allowed.
+PRIMARY_USER_ID: int | None = next(iter(ALLOWED_USER_IDS), None) if len(ALLOWED_USER_IDS) == 1 else None
 
 SERIAL_MAP_TTL_SECONDS = int(os.getenv("SERIAL_MAP_TTL_SECONDS", str(30 * 60)))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
@@ -70,6 +72,8 @@ def validate_startup() -> None:
         missing.append("GROQ_API_KEY")
     if missing:
         raise ConfigurationError("Missing required environment variables: " + ", ".join(missing))
+    if len(ALLOWED_USER_IDS) != 1:
+        raise ConfigurationError("Single-user mode requires exactly one ALLOWED_USER_IDS value")
     if not 0 <= TEMPERATURE <= 2:
         raise ConfigurationError("TEMPERATURE must be between 0 and 2")
     if GROQ_MAX_TOKENS < 256 or GROQ_MAX_TOKENS > 4096:
