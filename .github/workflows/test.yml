@@ -24,7 +24,5 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: dummy
           GROQ_API_KEY: dummy
-          GOOGLE_DRIVE_FOLDER_ID: dummy
-          GOOGLE_SERVICE_ACCOUNT_JSON: "{}"
           MEMORY_DB_PATH: /tmp/ci_memory.db
         run: python -m pytest -q
