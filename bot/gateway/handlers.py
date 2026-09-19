@@ -1,10 +1,12 @@
 import asyncio
+import io
 import logging
 from collections import defaultdict
 
 from telegram import Update
 from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from PIL import Image, UnidentifiedImageError
 
 from bot import config
 from bot.gateway.base import _allowed
@@ -54,24 +56,66 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
 
 
 async def _send_mcp_images(update: Update, images: list[tuple[bytes, str]]) -> int:
-    """Send image content returned by the custom Cloudflare MCP directly to Telegram."""
+    """Validate/normalize MCP images before sending them through Telegram."""
     sent = 0
     for index, (data, mime_type) in enumerate(images, start=1):
         if not data:
             continue
-        ext = {
-            "image/jpeg": ".jpg",
-            "image/png": ".png",
-            "image/webp": ".webp",
-            "image/gif": ".gif",
-            "image/bmp": ".bmp",
-        }.get(mime_type.lower(), ".jpg")
-        filename = f"cloudflare_image_{index}{ext}"
-        if len(data) <= 10 * 1024 * 1024 and mime_type.lower().startswith("image/"):
-            await update.message.reply_photo(photo=data, filename=filename)
-        else:
-            await update.message.reply_document(document=data, filename=filename)
-        sent += 1
+
+        filename = f"cloudflare_image_{index}.jpg"
+        try:
+            # Telegram can return Image_process_failed for valid-looking bytes
+            # that are malformed, unsupported, or awkwardly encoded. Decode the
+            # actual image first, then normalize it to a standard JPEG payload.
+            with Image.open(io.BytesIO(data)) as source:
+                source.load()
+                width, height = source.size
+                if width <= 0 or height <= 0:
+                    raise ValueError("invalid image dimensions")
+                if source.mode in ("RGBA", "LA", "P"):
+                    rgba = source.convert("RGBA")
+                    background = Image.new("RGB", rgba.size, "white")
+                    background.paste(rgba, mask=rgba.getchannel("A"))
+                    normalized = background
+                else:
+                    normalized = source.convert("RGB")
+
+                buffer = io.BytesIO()
+                normalized.save(buffer, format="JPEG", quality=92, optimize=True)
+                payload = buffer.getvalue()
+
+            if len(payload) > 10 * 1024 * 1024:
+                # Do not feed an oversized payload to send_photo. Telegram's
+                # document path gives us a safer fallback for large results.
+                await update.message.reply_document(
+                    document=io.BytesIO(payload),
+                    filename=filename,
+                )
+            else:
+                await update.message.reply_photo(
+                    photo=io.BytesIO(payload),
+                    filename=filename,
+                )
+            sent += 1
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            logger.warning(
+                "MCP image normalization failed index=%s mime=%s bytes=%s error=%s",
+                index,
+                mime_type,
+                len(data),
+                exc,
+            )
+            # Last-resort delivery: if Telegram can accept the bytes as a file,
+            # do not lose the image merely because photo processing failed.
+            try:
+                await update.message.reply_document(
+                    document=io.BytesIO(data),
+                    filename=f"cloudflare_image_{index}.bin",
+                )
+                sent += 1
+            except Exception:
+                logger.exception("MCP image delivery failed index=%s", index)
+
     return sent
 
 
