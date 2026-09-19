@@ -12,14 +12,17 @@ from bot.gateway.formatters import send_long_text
 from bot.domain.orchestrator import build_context_packet, maybe_update_session_summary
 from bot.domain.learning import should_extract, extract_and_merge
 from bot.agent.chat_agent import build_chat_agent
-from bot.agent.action_registry import parse_action_tags
 from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
-
-from bot.gateway.commands import *
-from bot.gateway.media import *
-from bot.gateway.vault import *
+from bot.gateway.media import (
+    handle_audio,
+    handle_document,
+    handle_photo,
+    handle_video,
+    handle_video_note,
+    handle_voice,
+)
 
 logger = logging.getLogger(__name__)
 _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -155,8 +158,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
             })
 
         full_reply = getattr(response, "content", None) or str(response)
-        clean_reply, actions = parse_action_tags(full_reply)
-        clean_reply = clean_reply.strip()
+        clean_reply = full_reply.strip()
     except BotError:
         logger.exception("conversation generation failed user=%s", uid)
         await update.message.reply_text("Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo.")
@@ -175,33 +177,13 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     if clean_reply:
         await send_long_text(update, clean_reply)
 
-    for tag, val in actions:
-        try:
-            if tag == "VOICE":
-                context.args = [clean_reply] if clean_reply else []
-                await cmd_voice(update, context)
-            elif tag == "VAULT_ADD":
-                context.args = [val] if val else []
-                await cmd_vault_add(update, context)
-            elif tag == "VAULT_LIST":
-                await cmd_vault_list(update, context)
-            elif tag == "VAULT_OPEN":
-                context.args = [val] if val else []
-                await cmd_vault_open(update, context)
-            elif tag == "SET_EMOTION" and val:
-                memory.set_emotion(uid, val.lower()[:40])
-            elif tag == "EVOLVE" and val:
-                profile = memory.get_profile(uid) or {}
-                evolutions = profile.get("persona_evolution", [])
-                evolutions.append(val[:300])
-                profile["persona_evolution"] = evolutions[-8:]
-                memory.set_profile(uid, profile)
-        except Exception:
-            logger.exception("action failed tag=%s user=%s", tag, uid)
-
     try:
         if should_extract(user_text):
-            extract_and_merge(memory, uid, user_text, clean_reply)
+            existing_profile = memory.get_profile(uid) or {}
+            new_profile = await extract_and_merge(
+                llm, existing_profile, user_text, clean_reply
+            )
+            memory.set_profile(uid, new_profile)
     except Exception:
         logger.exception("learning extraction failed user=%s", uid)
 
