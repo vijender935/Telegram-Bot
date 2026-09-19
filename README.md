@@ -1,39 +1,21 @@
 # 😈 Telegram Bot v3
 
-> **AI-first personal companion for Telegram** — memory, adaptive persona, vision, voice, Google Drive and a protected private vault.
+> AI-first personal companion for Telegram — memory, adaptive persona, vision, voice, a custom Cloudflare MCP image library and a protected private vault.
 
-## ✨ What changed in v3
+## Cloudflare MCP migration
 
-This release restructures the project around production concerns without throwing away the existing Telegram features:
+The bot now uses the user's own custom cloudflare-mcp server as the remote image/data layer.
 
-- 🧠 Layered memory facade with persistent SQLite storage and semantic indexing
-- 🤖 Structured tool/action registry with validated legacy Action-Tag compatibility
-- 🔎 Semantic Drive ranking with an optional `sentence-transformers` embedding backend
-- 🔐 PBKDF2 vault credential migration, failed-attempt lockout and short unlock sessions
-- 🛡️ Per-user request serialization and configurable rate limiting
-- ⚙️ Central typed configuration validation
-- ❤️ Health/readiness endpoint and production Waitress server
-- 🧪 Pytest + Ruff CI gates
-- 💾 Verified SQLite backups with retention
-- 🐳 Production Docker image with FFmpeg and non-root runtime
-- 🎨 Button-first Telegram home/settings UI
-- 📚 Architecture, security, deployment and contribution documentation
+- Layered memory facade with persistent SQLite storage and semantic indexing
+- Groq tool-calling agent with dynamically discovered MCP tools
+- Custom Cloudflare MCP only — no official Cloudflare MCP and no third-party RAG MCP
+- R2-backed image storage through ai-images-pilot
+- D1 catalog + Vectorize semantic image search
+- Native MCP image content delivered directly to Telegram
+- PBKDF2 vault security, per-user serialization and rate limiting
+- Health endpoint, structured logs, tests and Docker support
 
-## 🧩 Feature map
-
-| Area | Capability |
-|---|---|
-| Chat | Groq-powered contextual conversation |
-| Memory | History, profile, sessions, emotion, media and semantic index |
-| Persona | Mood, emotion, profile learning and evolution |
-| Vision | Image description and media reactions |
-| Voice | TTS plus audio/video transcription |
-| Drive | List, search, upload, download and semantic ranking |
-| Vault | Protected private media metadata with lockout/session controls |
-| Media | Photo, document, audio, video and video-note workflows |
-| Operations | Health endpoint, structured logs, graceful error handling |
-
-## 🏗️ Architecture
+## Architecture
 
 ```text
 Telegram
@@ -42,34 +24,34 @@ Telegram
 Gateway / UI ── Auth ── Rate Limit ── Error Boundary
    │
    ▼
-Application Services
+Groq Agent
    │
-   ├── Chat / Orchestration
-   ├── Memory
-   ├── Drive
-   ├── Vault
-   └── Media / Voice
+   ├── Memory tools
    │
-   ▼
-Domain
-   │
-   ├── Intent
-   ├── Persona / Mood
-   ├── Emotion
-   └── Session / Learning
-   │
-   ▼
-Infrastructure
-   ├── SQLite + semantic index
-   ├── Groq
-   ├── Google Drive
-   ├── FFmpeg
-   └── TTS / Vision / Transcription
+   └── YOUR custom Cloudflare MCP
+          │
+          ▼
+     ai-images-pilot
+       ├── R2: ai-images
+       ├── D1: ai-images-db
+       └── Vectorize: ai-images-index
 ```
 
-The `bot/` tree remains the compatibility surface for existing handlers while `bot/application`, `bot/core`, `bot/domain/memory` and `bot/infrastructure` provide the new separation-of-concerns layer.
+The MCP server exposes ai-images-pilot through a Cloudflare Service Binding. The bot discovers MCP tool schemas at startup instead of hard-coding a separate image-search API client.
 
-## 🚀 Quick start
+## Custom Cloudflare MCP tools
+
+The current MCP server exposes:
+- health
+- list_images
+- search_images
+- process_image
+- get_image
+- list_r2_objects
+
+For image delivery, the agent can call search_images and then get_image. The MCP returns actual image bytes as MCP image content; the Telegram gateway forwards those bytes without Google Drive or a public image URL.
+
+## Quick start
 
 Python 3.11 and FFmpeg are recommended.
 
@@ -83,47 +65,39 @@ python -m bot.main
 
 ### Environment
 
-Copy `.env.example` and provide the required Telegram and Groq credentials. Google Drive is optional.
-
-For Render, mount persistent storage at `/var/data` and keep `MEMORY_DB_PATH=/var/data/bot_memory.db` if you want memory to survive restarts/deploys.
-
-### Health
+Set Telegram/Groq credentials plus the custom Cloudflare MCP endpoint:
 
 ```text
-GET /
-GET /health
+CLOUDFLARE_MCP_ENABLED=true
+CLOUDFLARE_MCP_URL=https://cloudflare-mcp.vijender935.workers.dev/mcp
+CLOUDFLARE_MCP_API_KEY=
+CLOUDFLARE_MCP_TIMEOUT_SECONDS=30
+CLOUDFLARE_MCP_RETRIES=3
 ```
 
-`/health` reports configuration, database-path and FFmpeg readiness.
+No Google Drive credentials are required by the bot.
 
-## 🎛️ Telegram UX
+## Telegram UX
 
-`/start` opens a compact home panel. `/settings` provides memory/profile/mood/privacy shortcuts.
+Image/data operations are handled through normal language. Examples:
+- Summer street style wali image dikhao
+- Latest ready images dikhao
+- R2 mein kya pada hai?
+- Next pending image process karo
 
-Core commands include:
+The legacy Google Drive command surface is no longer registered.
 
-`/start` · `/settings` · `/mood` · `/profile` · `/clear` · `/voice` · `/drive` · `/search` · `/download` · `/upload` · `/vault_setcode` · `/vault_list` · `/vault_open`
+## Migration status
 
-## 🔐 Security notes
+1. Google Drive runtime dependency — removed
+2. Modal multimodal RAG MCP dependency — removed
+3. Custom Cloudflare MCP — integrated
+4. Dynamic MCP tool discovery — implemented
+5. Natural-language image retrieval — implemented
+6. Native MCP image to Telegram delivery — implemented
+7. Local memory/vault/persona — retained
 
-- Only allowlisted Telegram IDs are accepted when `ALLOWED_USER_IDS` is configured.
-- Vault codes are migrated to PBKDF2-SHA256 with per-code salts.
-- Repeated vault failures trigger temporary lockout.
-- Sensitive vault command messages are deleted when Telegram permissions allow it.
-- User-facing errors avoid exposing provider exceptions.
-- Logs are designed to avoid credentials and secrets.
-
-See [SECURITY.md](SECURITY.md) for the threat model and operational checklist.
-
-## 💾 Backups
-
-```bash
-MEMORY_DB_PATH=/var/data/bot_memory.db ./scripts/backup_sqlite.sh
-```
-
-The script uses SQLite's online backup API, runs an integrity check and removes backups older than the configured retention window.
-
-## 🧪 Development
+## Development
 
 ```bash
 ruff check bot tests
@@ -131,31 +105,10 @@ pytest
 python -m compileall bot tests
 ```
 
-## 🐳 Docker
+## Docker
 
 ```bash
 docker compose up --build
 ```
 
-The image installs FFmpeg, runs as a non-root user and persists `/var/data` through the compose volume.
-
-## 🗺️ Roadmap status
-
-1. Production stability — **implemented**
-2. Configuration/error system — **implemented**
-3. Testing/CI — **implemented**
-4. Memory architecture — **implemented as migration facade**
-5. Tool registry — **implemented as structured execution layer**
-6. Agent orchestration — **migration seam implemented; legacy tags retained for compatibility**
-7. Vault security — **implemented**
-8. Semantic Drive — **implemented with optional embeddings + fallback**
-9. Persona engine — **existing engine retained and isolated behind domain layer**
-10. Telegram UI — **implemented**
-11. Repository docs — **implemented**
-12. Docker/deployment — **implemented**
-13. Observability — **health + structured/redacted logging implemented**
-14. Backup/disaster recovery — **verified backup + retention implemented**
-
-## 📄 License
-
-See repository license information.
+See repository security documentation for operational guidance.
