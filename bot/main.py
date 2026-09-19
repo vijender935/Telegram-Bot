@@ -18,12 +18,10 @@ from bot.gateway.commands import *
 from bot.gateway.handlers import handle_text
 from bot.gateway.media import *
 from bot.gateway.vault import *
-from bot.infra.drive import DriveClient
 from bot.infra.memory import MemoryStore
 from bot.infra.sandbox import SandboxStorage
 from bot.infra.serial_map import SerialMapStore
-from bot.infra.rag_mcp import RAGMCPClient
-from bot.domain.drive_service import DriveService
+from bot.infra.rag_mcp import CloudflareMCPClient
 from bot.domain.memory_service import MemoryService
 from bot.domain.semantic_index import SemanticIndex
 from bot.domain.secure_memory import SecureMemory
@@ -44,14 +42,14 @@ def home():
 @web_app.route("/health")
 def health():
     result = check_health(config, config.MEMORY_DB_PATH)
-    rag = web_app.config.get("rag_mcp")
-    result["rag_mcp"] = {
-        "configured": bool(rag and rag.configured),
-        "available": bool(rag and rag.available),
-        "url": rag._safe_url() if rag else "",
-        "tools": sorted(rag.tool_map) if rag else [],
-        "last_error": rag.last_error if rag else "",
-        "last_health": rag.last_health if rag else {},
+    mcp = web_app.config.get("cloudflare_mcp")
+    result["cloudflare_mcp"] = {
+        "configured": bool(mcp and mcp.configured),
+        "available": bool(mcp and mcp.available),
+        "url": mcp._safe_url() if mcp else "",
+        "tools": sorted(mcp.tool_map) if mcp else [],
+        "last_error": mcp.last_error if mcp else "",
+        "last_health": mcp.last_health if mcp else {},
     }
     return jsonify(result)
 
@@ -75,8 +73,6 @@ async def ui_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.edit_message_text("👤 Profile: /profile")
     elif query.data == "ui_settings":
         await query.edit_message_text("⚙️ Settings: /settings")
-    elif query.data == "ui_drive":
-        await query.edit_message_text("☁️ Drive: /drive • /search • /download")
     elif query.data == "ui_vault":
         await query.edit_message_text("🔐 Vault: /vault_setcode • /vault_list • /vault_open")
     elif query.data == "ui_voice":
@@ -113,27 +109,16 @@ async def run_bot() -> None:
     memory = SecureMemory(MemoryService(store, semantic_index))
     serial_store = SerialMapStore(ttl_seconds=config.SERIAL_MAP_TTL_SECONDS, db_path=config.MEMORY_DB_PATH)
 
-    drive = None
-    if config.GOOGLE_FOLDER_ID and config.GOOGLE_SA_JSON:
-        try:
-            client = DriveClient(config.GOOGLE_FOLDER_ID, config.GOOGLE_SA_JSON, serial_store)
-            drive = DriveService(client, semantic_index)
-            logger.info("Drive + semantic index initialized")
-        except Exception:
-            logger.exception("Drive init failed; continuing without Drive")
-
-    rag_mcp = RAGMCPClient(
-        config.RAG_MCP_URL if config.RAG_MCP_ENABLED else "",
-        api_key=config.RAG_MCP_API_KEY,
-        timeout=config.RAG_MCP_TIMEOUT_SECONDS,
-        top_k=config.RAG_MCP_TOP_K,
-        mode=config.RAG_MCP_MODE,
-        retries=config.RAG_MCP_RETRIES,
+    cloudflare_mcp = CloudflareMCPClient(
+        config.CLOUDFLARE_MCP_URL if config.CLOUDFLARE_MCP_ENABLED else "",
+        api_key=config.CLOUDFLARE_MCP_API_KEY,
+        timeout=config.CLOUDFLARE_MCP_TIMEOUT_SECONDS,
+        retries=config.CLOUDFLARE_MCP_RETRIES,
     )
-    await rag_mcp.initialize()
-    if rag_mcp.configured:
-        await rag_mcp.health()
-    web_app.config["rag_mcp"] = rag_mcp
+    await cloudflare_mcp.initialize()
+    if cloudflare_mcp.configured:
+        await cloudflare_mcp.health()
+    web_app.config["cloudflare_mcp"] = cloudflare_mcp
 
     llm = build_llm()
     app = Application.builder().token(config.TELEGRAM_TOKEN).concurrent_updates(True).build()
@@ -141,9 +126,8 @@ async def run_bot() -> None:
         "sandbox": sandbox,
         "memory": memory,
         "serial_store": serial_store,
-        "drive": drive,
-        "rag_mcp": rag_mcp,
-        "rag_tools": rag_mcp.tools,
+        "cloudflare_mcp": cloudflare_mcp,
+        "mcp_tools": cloudflare_mcp.tools,
         "llm": llm,
         "groq_api_key": config.GROQ_API_KEY,
         "rate_limiter": SlidingWindowRateLimiter(config.RATE_LIMIT_PER_MINUTE, 60),
@@ -165,12 +149,6 @@ async def run_bot() -> None:
         CommandHandler("vault_open", cmd_vault_open),
         CommandHandler("vault_del", cmd_vault_del),
         CommandHandler("enhance", cmd_enhance),
-        CommandHandler("drive", cmd_drive),
-        CommandHandler("list", cmd_list),
-        CommandHandler("download", cmd_download),
-        CommandHandler("search", cmd_search),
-        CommandHandler("upload", cmd_upload),
-        CommandHandler("delete", cmd_delete),
         CallbackQueryHandler(mood_callback, pattern="^mood_"),
         CallbackQueryHandler(file_action_callback, pattern="^fileact_"),
         CallbackQueryHandler(enhance_callback, pattern="^enhance_"),
@@ -192,11 +170,11 @@ async def run_bot() -> None:
     start_scheduler(app, memory)
 
     logger.info(
-        "Bot v3 ready | model=%s | rag_mcp=%s tools=%s health=%s",
+        "Bot v3 ready | model=%s | custom_cloudflare_mcp=%s tools=%s health=%s",
         config.GROQ_MODEL,
-        rag_mcp.available,
-        sorted(rag_mcp.tool_map),
-        rag_mcp.last_health,
+        cloudflare_mcp.available,
+        sorted(cloudflare_mcp.tool_map),
+        cloudflare_mcp.last_health,
     )
 
     await app.initialize()
