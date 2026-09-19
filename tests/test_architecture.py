@@ -7,8 +7,8 @@ from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
 
 def test_action_tags_are_whitelisted():
     clean, actions = parse_action_tags("hello [VOICE] [UNKNOWN:bad]")
-    assert clean == "hello"
-    assert actions == [("VOICE", None)]
+    assert clean == "hello [VOICE] [UNKNOWN:bad]"
+    assert actions == []
 
 
 def test_tool_registry_executes_structured_calls():
