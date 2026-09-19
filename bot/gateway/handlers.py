@@ -35,8 +35,7 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
             if getattr(item, "type", None) == "image":
                 continue
             parts.append(_tool_result_text(item, image_count=0))
-        text = "
-".join(x for x in parts if x)
+        text = "\n".join(x for x in parts if x)
     elif isinstance(result, dict):
         safe = {
             k: v for k, v in result.items()
