@@ -18,83 +18,6 @@ from bot.infra.image_enhance import enhance_image, EnhanceMode
 
 logger = logging.getLogger(__name__)
 
-# --- Drive Commands ---
-
-async def cmd_drive(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    drive = _get_drive(context)
-    if not drive:
-        await update.message.reply_text("Abhi files nahi khol pa rahi.")
-        return
-    text = drive.list_files(update.effective_user.id, "root")
-    await send_long_text(update, text)
-
-async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    drive = _get_drive(context)
-    if not drive:
-        await update.message.reply_text("Abhi files nahi khol pa rahi.")
-        return
-    sub = " ".join(context.args) if context.args else "root"
-    text = drive.list_files(update.effective_user.id, sub)
-    await send_long_text(update, text)
-
-async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /download <number>\nPehle /drive chalao.")
-        return
-    await _do_download(update, context, int(context.args[0]))
-
-async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    if not context.args:
-        await update.message.reply_text("Usage: /search <query>")
-        return
-    drive = _get_drive(context)
-    if not drive:
-        await update.message.reply_text("Abhi files nahi khol pa rahi.")
-        return
-    await send_long_text(update, drive.search(" ".join(context.args)))
-
-async def cmd_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    sandbox = context.application.bot_data["sandbox"]
-    drive = _get_drive(context)
-    if not drive:
-        await update.message.reply_text("Abhi files nahi khol pa rahi.")
-        return
-    if not context.args:
-        await update.message.reply_text("Usage: /upload <local_filename>")
-        return
-    path = sandbox.path_for(context.args[0])
-    if not path.exists():
-        await update.message.reply_text(f"Local file nahi mili: {context.args[0]}")
-        return
-    try:
-        name = drive.upload(path)
-        await update.message.reply_text(f"Upload → {name}")
-    except Exception as e:
-        await update.message.reply_text(f"Upload fail: {e}")
-
-async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
-    sandbox = context.application.bot_data["sandbox"]
-    if not context.args:
-        await update.message.reply_text("Usage: /delete <filename>")
-        return
-    try:
-        sandbox.delete(context.args[0])
-        await update.message.reply_text(f"Deleted: {context.args[0]}")
-    except Exception as e:
-        await update.message.reply_text(str(e))
-
 async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         return
@@ -401,19 +324,6 @@ async def _send_media_with_followup(update: Update, context: ContextTypes.DEFAUL
     sandbox = context.application.bot_data["sandbox"]
     path = sandbox.path_for(filename)
     await send_local_file(update, path)
-
-async def _do_download(update: Update, context: ContextTypes.DEFAULT_TYPE, serial: int, subfolder: str = "root"):
-    drive = _get_drive(context)
-    if not drive:
-        await update.message.reply_text("Abhi files nahi khol pa rahi.")
-        return
-    sandbox = context.application.bot_data["sandbox"]
-    await update.message.reply_text("ruki…")
-    status, msg = drive.download_by_serial(update.effective_user.id, serial, sandbox.root, subfolder=subfolder)
-    if status != "ok":
-        await update.message.reply_text(msg)
-        return
-    await _send_media_with_followup(update, context, msg, update.effective_user.id)
 
 async def _transcribe_and_reply(update, context, file_bytes, filename, label):
     memory = context.application.bot_data["memory"]
