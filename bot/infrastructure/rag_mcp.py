@@ -159,6 +159,12 @@ class CloudflareMCPClient:
                     found.append((raw, mime))
                 except Exception:
                     logger.warning("Invalid MCP image content object received")
+            return found
+
+        # Some MCP adapters wrap the returned content inside a ToolMessage.
+        content = getattr(value, "content", None)
+        if content is not None and content is not value:
+            found.extend(cls._find_images(content))
         return found
 
     @classmethod
