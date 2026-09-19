@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import logging
 from collections import defaultdict
 
@@ -111,6 +112,34 @@ async def _send_mcp_images(update: Update, images: list[tuple[bytes, str]]) -> i
     return sent
 
 
+def _extract_tool_calls(response: object) -> list[dict]:
+    """Normalize LangChain tool calls across provider/adaptor message shapes."""
+    calls = getattr(response, "tool_calls", None) or []
+    if calls:
+        return [dict(call) for call in calls]
+
+    additional = getattr(response, "additional_kwargs", None) or {}
+    raw_calls = additional.get("tool_calls") or []
+    normalized: list[dict] = []
+    for raw in raw_calls:
+        if not isinstance(raw, dict):
+            continue
+        function = raw.get("function") or {}
+        args = function.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                logger.warning("Invalid tool-call arguments received: %s", args)
+                args = {}
+        normalized.append({
+            "id": raw.get("id") or "unknown",
+            "name": function.get("name") or raw.get("name"),
+            "args": args if isinstance(args, dict) else {},
+        })
+    return normalized
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not update.message or not _allowed(update.effective_user.id):
         return
@@ -151,8 +180,8 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         response = await chain.ainvoke({"input": user_text, "chat_history": llm_history})
-        for _ in range(2):
-            tool_calls = getattr(response, "tool_calls", None) or []
+        for _ in range(6):
+            tool_calls = _extract_tool_calls(response)
             if not tool_calls:
                 break
             tool_map = {tool.name: tool for tool in tools}
@@ -193,8 +222,18 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                 "chat_history": llm_history + [response] + tool_messages,
             })
 
-        full_reply = getattr(response, "content", None) or str(response)
-        clean_reply = full_reply.strip()
+        full_reply = getattr(response, "content", None)
+        clean_reply = str(full_reply).strip() if full_reply else ""
+        if not clean_reply:
+            remaining_calls = _extract_tool_calls(response)
+            if remaining_calls:
+                logger.warning(
+                    "Model returned unresolved tool calls after execution loop user=%s calls=%s",
+                    uid,
+                    [call.get("name") for call in remaining_calls],
+                )
+                clean_reply = "Tool operation complete nahi ho paaya. Please request ko ek baar dobara try karo."
+
     except BotError:
         logger.exception("conversation generation failed user=%s", uid)
         await update.message.reply_text("Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo.")
