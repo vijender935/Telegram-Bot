@@ -5,7 +5,7 @@ import logging
 import threading
 from pathlib import Path
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from waitress import serve
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes, Application, MessageHandler, filters
@@ -37,6 +37,8 @@ from bot.scheduler import start_scheduler
 configure_logging(config.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 web_app = Flask(__name__)
+_BOT_LOOP: asyncio.AbstractEventLoop | None = None
+_TELEGRAM_APP: Application | None = None
 
 
 @web_app.route("/")
@@ -57,6 +59,25 @@ def health():
         "last_health": mcp.last_health if mcp else {},
     }
     return jsonify(result)
+
+
+@web_app.post("/telegram")
+def telegram_webhook():
+    """Receive Telegram webhook updates and enqueue them on the bot event loop."""
+    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != config.TELEGRAM_WEBHOOK_SECRET:
+        return jsonify({"error": "forbidden"}), 403
+    if _BOT_LOOP is None or _TELEGRAM_APP is None:
+        return jsonify({"error": "bot not ready"}), 503
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid json"}), 400
+    try:
+        update = Update.de_json(payload, bot=_TELEGRAM_APP.bot)
+        _BOT_LOOP.call_soon_threadsafe(_TELEGRAM_APP.update_queue.put_nowait, update)
+    except Exception:
+        logger.exception("Telegram webhook update enqueue failed")
+        return jsonify({"error": "enqueue failed"}), 500
+    return "", 200
 
 
 def run_web() -> None:
@@ -92,7 +113,7 @@ async def run_bot() -> None:
     web_app.config["cloudflare_mcp"] = cloudflare_mcp
 
     llm = build_llm()
-    app = Application.builder().token(config.TELEGRAM_TOKEN).concurrent_updates(True).build()
+    app = Application.builder().token(config.TELEGRAM_TOKEN).updater(None).concurrent_updates(False).build()
     app.bot_data.update({
         "sandbox": sandbox,
         "memory": memory,
@@ -118,6 +139,9 @@ async def run_bot() -> None:
         app.add_handler(handler)
     app.add_error_handler(error_handler)
 
+    global _BOT_LOOP, _TELEGRAM_APP
+    _BOT_LOOP = asyncio.get_running_loop()
+    _TELEGRAM_APP = app
     threading.Thread(target=run_web, daemon=True).start()
     start_scheduler(app, memory)
 
@@ -131,12 +155,19 @@ async def run_bot() -> None:
 
     await app.initialize()
     await app.start()
-    await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    webhook_url = f"{config.TELEGRAM_WEBHOOK_URL}/telegram"
+    await app.bot.set_webhook(
+        url=webhook_url,
+        secret_token=config.TELEGRAM_WEBHOOK_SECRET,
+        allowed_updates=Update.ALL_TYPES,
+    )
+    logger.info("Telegram webhook active url=%s", webhook_url)
     try:
         while True:
             await asyncio.sleep(3600)
     finally:
-        await app.updater.stop()
+        # Do not delete the webhook during Render's overlap window: an old
+        # instance may shut down after a new instance has already installed it.
         await app.stop()
         await app.shutdown()
 

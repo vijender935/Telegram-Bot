@@ -3,6 +3,4 @@ from bot import config
 
 
 def _allowed(uid: int) -> bool:
-    if not config.ALLOWED_USER_IDS:
-        return True
-    return uid in config.ALLOWED_USER_IDS
+    return config.PRIMARY_USER_ID is not None and uid == config.PRIMARY_USER_ID

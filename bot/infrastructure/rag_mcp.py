@@ -8,9 +8,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
-import httpx
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
@@ -91,28 +90,56 @@ class CloudflareMCPClient:
         return []
 
     async def health(self) -> dict[str, object]:
-        """Check the custom MCP's upstream Worker health endpoint."""
+        """Check health through the custom MCP's discovered health tool."""
         if not self.configured:
             self.last_health = {"status": "disabled"}
             return self.last_health
 
-        parsed = urlparse(self.url)
-        if parsed.path.endswith("/mcp"):
-            health_path = parsed.path[:-4] + "/health"
-        else:
-            health_path = parsed.path.rstrip("/") + "/health"
-        health_url = urlunparse(parsed._replace(path=health_path, query="", fragment=""))
-        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        health_tool = self.tool_map.get("health")
+        if not health_tool:
+            self.last_health = {
+                "status": "error",
+                "error": "Custom Cloudflare MCP did not expose the health tool",
+            }
+            return self.last_health
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
-                response = await client.get(health_url, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                self.last_health = data if isinstance(data, dict) else {"status": "ok"}
+            result = await asyncio.wait_for(health_tool.ainvoke({}), timeout=self.timeout)
+            data = self._normalize_health_result(result)
+            self.last_health = data
         except Exception as exc:
-            self.last_health = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+            self.last_health = {
+                "status": "error",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
         return self.last_health
+
+    @classmethod
+    def _normalize_health_result(cls, result: object) -> dict[str, object]:
+        """Normalize common MCP/LangChain health-tool result shapes."""
+        if isinstance(result, dict):
+            return result
+
+        content = getattr(result, "content", None)
+        if content is not None and content is not result:
+            normalized = cls._normalize_health_result(content)
+            if normalized:
+                return normalized
+
+        if isinstance(result, list):
+            for item in result:
+                normalized = cls._normalize_health_result(item)
+                if normalized:
+                    return normalized
+
+        text = getattr(result, "text", None)
+        if text:
+            return {"status": "ok", "message": str(text)}
+
+        if result is None:
+            return {"status": "ok"}
+
+        return {"status": "ok", "result": str(result)}
 
     async def invoke(self, tool_name: str, args: dict | None = None) -> object:
         """Invoke one dynamically discovered custom MCP tool."""
