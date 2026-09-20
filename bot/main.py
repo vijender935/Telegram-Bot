@@ -11,7 +11,7 @@ from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes, Application, MessageHandler, filters
 
 from bot import config
-from bot.agent.chat_agent import build_groq_llm, build_gemini_llm
+from bot.agent.chat_agent import build_groq_llm
 from bot.core.health import check_health
 from bot.core.logging import configure_logging
 from bot.gateway.commands import cmd_start
@@ -59,8 +59,6 @@ def health():
     }
     result["models"] = {
         "groq": config.GROQ_MODEL,
-        "gemini": config.GEMINI_MODEL if config.GEMINI_ENABLED else None,
-        "gemini_enabled": config.GEMINI_ENABLED,
     }
     return jsonify(result)
 
@@ -118,12 +116,6 @@ async def run_bot() -> None:
     web_app.config["cloudflare_mcp"] = cloudflare_mcp
 
     groq_llm = build_groq_llm()
-    gemini_llm = None
-    if config.GEMINI_ENABLED:
-        try:
-            gemini_llm = build_gemini_llm()
-        except Exception:
-            logger.exception("Gemini init failed — chat path will fall back to Groq")
 
     app = Application.builder().token(config.TELEGRAM_TOKEN).updater(None).concurrent_updates(False).build()
     app.bot_data.update({
@@ -133,7 +125,6 @@ async def run_bot() -> None:
         "cloudflare_mcp": cloudflare_mcp,
         "mcp_tools": cloudflare_mcp.tools,
         "llm": groq_llm,
-        "gemini_llm": gemini_llm,
         "groq_api_key": config.GROQ_API_KEY,
         "rate_limiter": SlidingWindowRateLimiter(config.RATE_LIMIT_PER_MINUTE, 60),
     })
@@ -182,10 +173,8 @@ async def run_bot() -> None:
     asyncio.create_task(initialize_mcp_background(), name="cloudflare-mcp-init")
 
     logger.info(
-        "Bot v3 ready | groq=%s | gemini=%s enabled=%s | mcp_init=background",
+        "Bot v3 ready | groq=%s | mcp_init=background",
         config.GROQ_MODEL,
-        config.GEMINI_MODEL,
-        config.GEMINI_ENABLED and gemini_llm is not None,
     )
 
     webhook_url = f"{config.TELEGRAM_WEBHOOK_URL}/telegram"
