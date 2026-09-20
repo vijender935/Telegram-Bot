@@ -187,7 +187,14 @@ class CloudflareMCPClient:
                     logger.warning("Invalid MCP image content object received")
             return found
 
-        # Some MCP adapters wrap the returned content inside a ToolMessage.
+        # Some MCP adapters wrap non-text MCP content in a ToolMessage
+        # artifact instead of putting it in ToolMessage.content. In particular,
+        # older langchain-mcp-adapters releases can preserve MCP ImageContent
+        # objects in artifact, so inspect both locations.
+        artifact = getattr(value, "artifact", None)
+        if artifact is not None and artifact is not value:
+            found.extend(cls._find_images(artifact))
+
         content = getattr(value, "content", None)
         if content is not None and content is not value:
             found.extend(cls._find_images(content))
