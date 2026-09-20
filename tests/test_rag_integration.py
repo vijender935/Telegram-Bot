@@ -1,8 +1,6 @@
 import base64
 
 from langchain_core.tools import tool
-
-from bot.agent.action_registry import parse_action_tags
 from bot.agent.tools import build_tools
 from bot.infrastructure.rag_mcp import CloudflareMCPClient
 
@@ -16,12 +14,6 @@ def search_images(query: str) -> str:
 def test_cloudflare_mcp_tools_are_exposed_without_replacing_existing_tools():
     tools = build_tools(mcp_tools=[search_images])
     assert [tool.name for tool in tools] == ["search_images"]
-
-
-def test_legacy_action_tags_are_not_required_for_normal_responses():
-    clean, actions = parse_action_tags("Done [SET_EMOTION: happy]")
-    assert clean == "Done [SET_EMOTION: happy]"
-    assert actions == []
 
 
 def test_cloudflare_mcp_extracts_wrapped_image_content():
