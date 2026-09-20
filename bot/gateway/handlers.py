@@ -10,7 +10,6 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from PIL import Image, UnidentifiedImageError
 
 from bot import config
-from bot.gateway.base import _allowed
 from bot.gateway.formatters import send_long_text
 from bot.domain.orchestrator import build_context_packet, maybe_update_session_summary
 from bot.domain.learning import should_extract, extract_and_merge
@@ -141,7 +140,7 @@ def _extract_tool_calls(response: object) -> list[dict]:
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_user or not update.message or not _allowed(update.effective_user.id):
+    if not update.effective_user or not update.message:
         return
     uid = update.effective_user.id
     limiter = context.application.bot_data.get("rate_limiter")
