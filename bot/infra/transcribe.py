@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import httpx
+import imageio_ffmpeg
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,11 @@ def _mime_for(filename: str) -> str:
     return "application/octet-stream"
 
 
+def ffmpeg_executable() -> str:
+    """Return the bundled/system ffmpeg executable path."""
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
 async def transcribe_audio(file_bytes: bytes, filename: str, api_key: str) -> str:
     """Groq Whisper transcription with correct MIME + clear errors."""
     if not api_key:
@@ -42,10 +48,7 @@ async def transcribe_audio(file_bytes: bytes, filename: str, api_key: str) -> st
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {api_key}"},
             files={"file": (filename, file_bytes, mime)},
-            data={
-                "model": "whisper-large-v3-turbo",
-                "response_format": "text",
-            },
+            data={"model": "whisper-large-v3-turbo", "response_format": "text"},
         )
         if resp.status_code >= 400:
             detail = resp.text[:300]
@@ -59,19 +62,16 @@ async def transcribe_audio(file_bytes: bytes, filename: str, api_key: str) -> st
 
 def ffmpeg_available() -> bool:
     try:
-        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
-        return True
+        path = ffmpeg_executable()
+        return bool(path and Path(path).exists())
     except Exception:
         return False
 
 
 def extract_audio_from_video(video_bytes: bytes) -> bytes:
-    """Video → mp3 via ffmpeg. Raises clear error if ffmpeg missing."""
+    """Video → mp3 via ffmpeg. Uses imageio-ffmpeg on Render and system ffmpeg in Docker."""
     if not ffmpeg_available():
-        raise RuntimeError(
-            "ffmpeg server pe install nahi hai. "
-            "Render Build Command mein add karo: apt-get update && apt-get install -y ffmpeg"
-        )
+        raise RuntimeError("ffmpeg runtime unavailable — video processing cannot start")
 
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as vf:
         vf.write(video_bytes)
@@ -79,7 +79,7 @@ def extract_audio_from_video(video_bytes: bytes) -> bytes:
     out_path = vf_path.replace(".mp4", ".mp3")
     try:
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", vf_path, "-vn", "-ar", "16000",
+            [ffmpeg_executable(), "-y", "-i", vf_path, "-vn", "-ar", "16000",
              "-ac", "1", "-b:a", "64k", out_path],
             capture_output=True,
         )
