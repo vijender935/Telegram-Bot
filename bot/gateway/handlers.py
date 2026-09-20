@@ -21,7 +21,6 @@ from bot.agent.router import route_task
 from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
-from bot.infrastructure.vision import describe_image_bytes
 from bot.gateway.mcp_media import extract_r2_keys, send_mcp_images
 
 logger = logging.getLogger(__name__)
@@ -311,17 +310,9 @@ async def _execute_tool_calls(
                                 if fetched:
                                     key = r2_keys[0]
                                     if key not in delivered_r2_keys:
-                                        caption = None
-                                        try:
-                                            caption = await describe_image_bytes(
-                                                fetched[0][0],
-                                                "cloudflare_image_1.jpg",
-                                            )
-                                            caption = (caption or "").strip()[:1024] or None
-                                        except Exception:
-                                            logger.exception("image caption failed key=%s", key)
+                                        # Image-only delivery: do not generate or attach a caption.
                                         delivered = await send_mcp_images(
-                                            update, fetched, caption=caption
+                                            update, fetched, caption=None
                                         )
                                         if delivered:
                                             delivered_r2_keys.add(key)
