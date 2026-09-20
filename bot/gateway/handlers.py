@@ -1,5 +1,4 @@
 import asyncio
-import io
 import json
 import logging
 from collections import defaultdict
@@ -7,7 +6,6 @@ from collections import defaultdict
 from telegram import Update
 from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from PIL import Image, UnidentifiedImageError
 
 from bot import config
 from bot.gateway.formatters import send_long_text
@@ -23,6 +21,7 @@ from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
 from bot.infra.vision import describe_image_bytes
+from bot.gateway.mcp_media import extract_r2_keys, send_mcp_images
 
 logger = logging.getLogger(__name__)
 _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -50,110 +49,6 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
     if image_count:
         text = (text + "\n" if text else "") + f"{image_count} image(s) retrieved and sent to the user."
     return text[:4000]
-
-
-async def _send_mcp_images(
-    update: Update,
-    images: list[tuple[bytes, str]],
-    caption: str | None = None,
-) -> int:
-    sent = 0
-    for index, (data, mime_type) in enumerate(images, start=1):
-        if not data:
-            continue
-
-        filename = f"cloudflare_image_{index}.jpg"
-        try:
-            with Image.open(io.BytesIO(data)) as source:
-                source.load()
-                width, height = source.size
-                if width <= 0 or height <= 0:
-                    raise ValueError("invalid image dimensions")
-                if source.mode in ("RGBA", "LA", "P"):
-                    rgba = source.convert("RGBA")
-                    background = Image.new("RGB", rgba.size, "white")
-                    background.paste(rgba, mask=rgba.getchannel("A"))
-                    normalized = background
-                else:
-                    normalized = source.convert("RGB")
-
-                buffer = io.BytesIO()
-                normalized.save(buffer, format="JPEG", quality=92, optimize=True)
-                payload = buffer.getvalue()
-
-            if len(payload) > 10 * 1024 * 1024:
-                await update.message.reply_document(
-                    document=io.BytesIO(payload),
-                    filename=filename,
-                    caption=caption if sent == 0 else None,
-                )
-            else:
-                await update.message.reply_photo(
-                    photo=io.BytesIO(payload),
-                    filename=filename,
-                    caption=caption if sent == 0 else None,
-                )
-            sent += 1
-        except (UnidentifiedImageError, OSError, ValueError) as exc:
-            logger.warning(
-                "MCP image normalization failed index=%s mime=%s bytes=%s error=%s",
-                index, mime_type, len(data), exc,
-            )
-            try:
-                await update.message.reply_document(
-                    document=io.BytesIO(data),
-                    filename=f"cloudflare_image_{index}.bin",
-                    caption=caption if sent == 0 else None,
-                )
-                sent += 1
-            except Exception:
-                logger.exception("MCP image delivery failed index=%s", index)
-
-    return sent
-
-
-def _extract_r2_keys(value: object) -> list[str]:
-    found: list[str] = []
-    seen: set[str] = set()
-
-    def add(value: object) -> None:
-        if not isinstance(value, str) or not value or value in seen:
-            return
-        seen.add(value)
-        found.append(value)
-
-    def walk(item: object) -> None:
-        if isinstance(item, str):
-            raw = item.strip()
-            if raw.startswith("{") or raw.startswith("["):
-                try:
-                    walk(json.loads(raw))
-                except json.JSONDecodeError:
-                    pass
-            return
-        if isinstance(item, (list, tuple)):
-            for child in item:
-                walk(child)
-            return
-        if isinstance(item, dict):
-            for key_name in ("r2_key", "r2Key"):
-                value = item.get(key_name)
-                if isinstance(value, str):
-                    add(value)
-            metadata = item.get("metadata")
-            if metadata is not None:
-                walk(metadata)
-            for key_name in ("matches", "images", "results", "content"):
-                child = item.get(key_name)
-                if child is not None:
-                    walk(child)
-            return
-        content = getattr(item, "content", None)
-        if content is not None and content is not item:
-            walk(content)
-
-    walk(value)
-    return found
 
 
 def _extract_tool_calls(response: object) -> list[dict]:
@@ -351,10 +246,10 @@ async def _run_tools_path(
                     if cloudflare_mcp:
                         images = cloudflare_mcp.extract_images(result)
                         if images:
-                            image_count = await _send_mcp_images(update, images)
+                            image_count = await send_mcp_images(update, images)
 
                         if call.get("name") == "search_images":
-                            keys = _extract_r2_keys(result)
+                            keys = extract_r2_keys(result)
                             if keys:
                                 try:
                                     image_result = await cloudflare_mcp.invoke_raw("get_image", {"key": keys[0]})
