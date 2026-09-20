@@ -23,8 +23,6 @@ GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.95"))
 GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "1024"))
 GEMINI_ENABLED = os.getenv("GEMINI_ENABLED", "true").lower() in ("1", "true", "yes")
 
-HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "").strip()
 
 SANDBOX_PATH = os.getenv("SANDBOX_PATH", "/var/data/bot_files" if os.path.isdir("/var/data") else "/tmp/bot_files")
 MEMORY_DB_PATH = os.getenv("MEMORY_DB_PATH", "/var/data/bot_memory.db" if os.path.isdir("/var/data") else "/tmp/bot_memory.db")
@@ -34,8 +32,6 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
 GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b").strip()
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "1200"))
 GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.7"))
-# legacy alias
-TEMPERATURE = float(os.getenv("TEMPERATURE", str(GROQ_TEMPERATURE)))
 
 SERIAL_MAP_TTL_SECONDS = int(os.getenv("SERIAL_MAP_TTL_SECONDS", str(30 * 60)))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
