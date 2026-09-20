@@ -167,12 +167,36 @@ class CloudflareMCPClient:
             if value.get("type") == "image" and value.get("data"):
                 try:
                     raw = base64.b64decode(str(value["data"]), validate=True)
-                    mime = str(value.get("mimeType") or "image/jpeg")
+                    mime = str(value.get("mimeType") or value.get("mime_type") or "image/jpeg")
                     found.append((raw, mime))
                 except Exception:
                     logger.warning("Invalid MCP image content received")
+
+            # Support LangChain standard image blocks as a forward-compatible
+            # fallback (data:image/...;base64,...).
+            image_url = value.get("image_url")
+            if isinstance(image_url, dict):
+                url = image_url.get("url")
+                if isinstance(url, str) and url.startswith("data:image/") and ";base64," in url:
+                    try:
+                        header, encoded = url.split(";base64,", 1)
+                        raw = base64.b64decode(encoded, validate=True)
+                        mime = header[5:] or "image/jpeg"
+                        found.append((raw, mime))
+                    except Exception:
+                        logger.warning("Invalid MCP standard image block received")
+
+            # Some wrappers use base64_data instead of MCP's data field.
+            if value.get("base64_data") and value.get("type") == "image":
+                try:
+                    raw = base64.b64decode(str(value["base64_data"]), validate=True)
+                    mime = str(value.get("mimeType") or value.get("mime_type") or "image/jpeg")
+                    found.append((raw, mime))
+                except Exception:
+                    logger.warning("Invalid MCP base64 image artifact received")
+
             for key, item in value.items():
-                if key not in {"data"}:
+                if key not in {"data", "base64_data"}:
                     found.extend(cls._find_images(item))
             return found
 
@@ -181,7 +205,11 @@ class CloudflareMCPClient:
             if data:
                 try:
                     raw = base64.b64decode(str(data), validate=True)
-                    mime = str(getattr(value, "mimeType", None) or "image/jpeg")
+                    mime = str(
+                        getattr(value, "mimeType", None)
+                        or getattr(value, "mime_type", None)
+                        or "image/jpeg"
+                    )
                     found.append((raw, mime))
                 except Exception:
                     logger.warning("Invalid MCP image content object received")
