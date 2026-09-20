@@ -11,7 +11,7 @@ from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes, Application, MessageHandler, filters
 
 from bot import config
-from bot.agent.chat_agent import build_llm
+from bot.agent.chat_agent import build_groq_llm, build_gemini_llm
 from bot.core.health import check_health
 from bot.core.logging import configure_logging
 from bot.gateway.commands import cmd_start
@@ -58,12 +58,16 @@ def health():
         "last_error": mcp.last_error if mcp else "",
         "last_health": mcp.last_health if mcp else {},
     }
+    result["models"] = {
+        "groq": config.GROQ_MODEL,
+        "gemini": config.GEMINI_MODEL if config.GEMINI_ENABLED else None,
+        "gemini_enabled": config.GEMINI_ENABLED,
+    }
     return jsonify(result)
 
 
 @web_app.post("/telegram")
 def telegram_webhook():
-    """Receive Telegram webhook updates and enqueue them on the bot event loop."""
     if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != config.TELEGRAM_WEBHOOK_SECRET:
         return jsonify({"error": "forbidden"}), 403
     if _BOT_LOOP is None or _TELEGRAM_APP is None:
@@ -112,7 +116,14 @@ async def run_bot() -> None:
         await cloudflare_mcp.health()
     web_app.config["cloudflare_mcp"] = cloudflare_mcp
 
-    llm = build_llm()
+    groq_llm = build_groq_llm()
+    gemini_llm = None
+    if config.GEMINI_ENABLED:
+        try:
+            gemini_llm = build_gemini_llm()
+        except Exception:
+            logger.exception("Gemini init failed — chat path will fall back to Groq")
+
     app = Application.builder().token(config.TELEGRAM_TOKEN).updater(None).concurrent_updates(False).build()
     app.bot_data.update({
         "sandbox": sandbox,
@@ -120,7 +131,8 @@ async def run_bot() -> None:
         "serial_store": serial_store,
         "cloudflare_mcp": cloudflare_mcp,
         "mcp_tools": cloudflare_mcp.tools,
-        "llm": llm,
+        "llm": groq_llm,
+        "gemini_llm": gemini_llm,
         "groq_api_key": config.GROQ_API_KEY,
         "rate_limiter": SlidingWindowRateLimiter(config.RATE_LIMIT_PER_MINUTE, 60),
     })
@@ -146,11 +158,12 @@ async def run_bot() -> None:
     start_scheduler(app, memory)
 
     logger.info(
-        "Bot v3 ready | model=%s | custom_cloudflare_mcp=%s tools=%s health=%s",
+        "Bot v3 ready | groq=%s | gemini=%s enabled=%s | mcp=%s tools=%s",
         config.GROQ_MODEL,
+        config.GEMINI_MODEL,
+        config.GEMINI_ENABLED and gemini_llm is not None,
         cloudflare_mcp.available,
         sorted(cloudflare_mcp.tool_map),
-        cloudflare_mcp.last_health,
     )
 
     await app.initialize()
@@ -166,8 +179,6 @@ async def run_bot() -> None:
         while True:
             await asyncio.sleep(3600)
     finally:
-        # Do not delete the webhook during Render's overlap window: an old
-        # instance may shut down after a new instance has already installed it.
         await app.stop()
         await app.shutdown()
 

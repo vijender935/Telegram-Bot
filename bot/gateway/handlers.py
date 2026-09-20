@@ -13,7 +13,12 @@ from bot import config
 from bot.gateway.formatters import send_long_text
 from bot.domain.orchestrator import build_context_packet, maybe_update_session_summary
 from bot.domain.learning import should_extract, extract_and_merge
-from bot.agent.chat_agent import build_chat_agent_with_components
+from bot.agent.chat_agent import (
+    build_chat_agent_with_components,
+    build_groq_llm,
+    build_gemini_llm,
+)
+from bot.agent.router import route_task
 from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
@@ -24,7 +29,6 @@ _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 def _tool_result_text(result: object, image_count: int = 0) -> str:
-    """Keep MCP image bytes out of the LLM context while preserving useful text."""
     if isinstance(result, (list, tuple)):
         parts = []
         for item in result:
@@ -53,7 +57,6 @@ async def _send_mcp_images(
     images: list[tuple[bytes, str]],
     caption: str | None = None,
 ) -> int:
-    """Validate/normalize MCP images before sending them through Telegram."""
     sent = 0
     for index, (data, mime_type) in enumerate(images, start=1):
         if not data:
@@ -94,10 +97,7 @@ async def _send_mcp_images(
         except (UnidentifiedImageError, OSError, ValueError) as exc:
             logger.warning(
                 "MCP image normalization failed index=%s mime=%s bytes=%s error=%s",
-                index,
-                mime_type,
-                len(data),
-                exc,
+                index, mime_type, len(data), exc,
             )
             try:
                 await update.message.reply_document(
@@ -113,7 +113,6 @@ async def _send_mcp_images(
 
 
 def _extract_r2_keys(value: object) -> list[str]:
-    """Extract exact R2 keys from a search/list result without guessing."""
     found: list[str] = []
     seen: set[str] = set()
 
@@ -158,7 +157,6 @@ def _extract_r2_keys(value: object) -> list[str]:
 
 
 def _extract_tool_calls(response: object) -> list[dict]:
-    """Normalize LangChain tool calls across provider/adaptor message shapes."""
     calls = getattr(response, "tool_calls", None) or []
     if calls:
         return [dict(call) for call in calls]
@@ -200,27 +198,119 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE, uid: int):
     user_text = update.message.text or ""
     memory = context.application.bot_data["memory"]
-    llm = context.application.bot_data["llm"]
     cloudflare_mcp = context.application.bot_data.get("cloudflare_mcp")
     mcp_tools = context.application.bot_data.get("mcp_tools", [])
+
+    task = route_task(user_text)
+    logger.info("route task=%s user=%s", task, uid)
 
     ctx = build_context_packet(memory, uid, user_text=user_text)
     history = memory.get_history(uid)
     llm_history = history[-config.LLM_HISTORY_MESSAGES:] if config.LLM_HISTORY_MESSAGES else []
+
+    if task == "chat" and config.GEMINI_ENABLED:
+        clean_reply = await _run_chat_path(
+            update, context, uid, user_text, ctx, llm_history, memory
+        )
+    else:
+        clean_reply = await _run_tools_path(
+            update, context, uid, user_text, ctx, llm_history, memory,
+            cloudflare_mcp, mcp_tools,
+        )
+
+    if clean_reply is None:
+        return
+
+    history.extend([HumanMessage(content=user_text), AIMessage(content=clean_reply)])
+    try:
+        memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
+    except Exception:
+        logger.exception("conversation history persistence failed user=%s", uid)
+
+    if clean_reply:
+        await send_long_text(update, clean_reply)
+
+    # Learning + session summary use Groq (stable, cheap)
+    try:
+        groq_llm = context.application.bot_data.get("llm") or build_groq_llm()
+        if should_extract(user_text):
+            existing_profile = memory.get_profile(uid) or {}
+            new_profile = await extract_and_merge(
+                groq_llm, existing_profile, user_text, clean_reply
+            )
+            memory.set_profile(uid, new_profile)
+    except Exception:
+        logger.exception("learning extraction failed user=%s", uid)
+
+    try:
+        groq_llm = context.application.bot_data.get("llm") or build_groq_llm()
+        await maybe_update_session_summary(groq_llm, memory, uid, user_text, clean_reply)
+    except Exception:
+        logger.exception("session summary update failed user=%s", uid)
+
+
+async def _run_chat_path(
+    update, context, uid, user_text, ctx, llm_history, memory
+) -> str | None:
+    """Gemini path — pure conversation, no tools, identity prompt."""
+    try:
+        llm = context.application.bot_data.get("gemini_llm")
+        if llm is None:
+            llm = build_gemini_llm()
+            context.application.bot_data["gemini_llm"] = llm
+
+        chain, _, _ = build_chat_agent_with_components(
+            llm,
+            tools=[],  # no tools on chat path — keeps Gemini natural
+            user_profile=ctx["profile"],
+            session_summary=ctx["session_summary_text"],
+            last_media=ctx["last_media_text"],
+            time_context=ctx["time_context"],
+            memory_context=ctx.get("memory_context_text", ""),
+            mode="chat",
+        )
+        response = await chain.ainvoke({"input": user_text, "chat_history": llm_history})
+        full_reply = getattr(response, "content", None)
+        clean_reply = str(full_reply).strip() if full_reply else ""
+        if not clean_reply:
+            clean_reply = "hmm... bol na, sun rahi hoon."
+        return clean_reply
+    except BotError:
+        logger.exception("gemini chat failed user=%s", uid)
+        await update.message.reply_text("Thodi der baad try karo.")
+        return None
+    except Exception:
+        logger.exception("gemini chat failed user=%s — falling back to groq", uid)
+        # soft fallback to tools path without tools
+        return await _run_tools_path(
+            update, context, uid, user_text, ctx, llm_history, memory,
+            None, [], force_chat_mode=True,
+        )
+
+
+async def _run_tools_path(
+    update, context, uid, user_text, ctx, llm_history, memory,
+    cloudflare_mcp, mcp_tools, force_chat_mode: bool = False,
+) -> str | None:
+    """Groq path — tools + technical prompt."""
+    llm = context.application.bot_data.get("llm") or build_groq_llm()
     response_policy = infer_response_policy(user_text, ctx["profile"])
     tools = build_tools(
         memory=memory,
         user_id=uid,
         sandbox_path=config.SANDBOX_PATH,
-        mcp_tools=mcp_tools,
+        mcp_tools=mcp_tools if not force_chat_mode else [],
     )
+    mode = "chat" if force_chat_mode else "tools"
     chain, system_message, tool_model = build_chat_agent_with_components(
         llm, tools,
         user_profile=ctx["profile"],
-        session_summary=ctx["session_summary_text"], last_media=ctx["last_media_text"],
+        session_summary=ctx["session_summary_text"],
+        last_media=ctx["last_media_text"],
         time_context=ctx["time_context"],
         memory_context=ctx.get("memory_context_text", ""),
         response_policy=response_policy.to_prompt(),
+        mode=mode,
     )
 
     try:
@@ -253,11 +343,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                     cached_result = executed_tool_results.get(call_signature)
                     if cached_result is not None:
                         result = cached_result
-                        logger.info(
-                            "deduplicated repeated tool call name=%s user=%s",
-                            call.get("name"),
-                            uid,
-                        )
                     else:
                         result = await tool.ainvoke(call_args)
                         executed_tool_results[call_signature] = result
@@ -267,63 +352,32 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                         images = cloudflare_mcp.extract_images(result)
                         if images:
                             image_count = await _send_mcp_images(update, images)
-                            logger.info(
-                                "sent %s MCP image(s) directly to Telegram tool=%s user=%s",
-                                image_count,
-                                call.get("name"),
-                                uid,
-                            )
 
                         if call.get("name") == "search_images":
                             keys = _extract_r2_keys(result)
-                            logger.info(
-                                "search_images extracted_r2_keys=%s user=%s",
-                                keys[:5],
-                                uid,
-                            )
                             if keys:
-                                get_image_tool = tool_map.get("get_image")
-                                if get_image_tool:
-                                    try:
-                                        image_result = await cloudflare_mcp.invoke_raw("get_image", {"key": keys[0]})
-                                        fetched = cloudflare_mcp.extract_images(image_result)
-                                        if fetched:
-                                            key = keys[0]
-                                            if key in delivered_r2_keys:
-                                                logger.info(
-                                                    "suppressed duplicate image delivery key=%s user=%s",
-                                                    key,
-                                                    uid,
+                                try:
+                                    image_result = await cloudflare_mcp.invoke_raw("get_image", {"key": keys[0]})
+                                    fetched = cloudflare_mcp.extract_images(image_result)
+                                    if fetched:
+                                        key = keys[0]
+                                        if key not in delivered_r2_keys:
+                                            caption = None
+                                            try:
+                                                caption = await describe_image_bytes(
+                                                    fetched[0][0], "cloudflare_image_1.jpg",
                                                 )
-                                            else:
-                                                caption = None
-                                                try:
-                                                    caption = await describe_image_bytes(
-                                                        fetched[0][0],
-                                                        "cloudflare_image_1.jpg",
-                                                    )
-                                                    caption = caption.strip()[:1024] or None
-                                                except Exception:
-                                                    logger.exception(
-                                                        "image caption generation failed key=%s user=%s",
-                                                        key,
-                                                        uid,
-                                                    )
-                                                delivered = await _send_mcp_images(
-                                                    update,
-                                                    fetched,
-                                                    caption=caption,
-                                                )
-                                                if delivered:
-                                                    delivered_r2_keys.add(key)
-                                                image_count += delivered
-                                            result = image_result
-                                    except Exception:
-                                        logger.exception(
-                                            "automatic get_image failed key=%s user=%s",
-                                            keys[0],
-                                            uid,
-                                        )
+                                                caption = (caption or "").strip()[:1024] or None
+                                            except Exception:
+                                                logger.exception("image caption failed key=%s", key)
+                                            delivered = await _send_mcp_images(update, fetched, caption=caption)
+                                            if delivered:
+                                                delivered_r2_keys.add(key)
+                                            image_count += delivered
+                                        result = image_result
+                                except Exception:
+                                    logger.exception("automatic get_image failed key=%s", keys[0])
+
                     tool_messages.append(
                         ToolMessage(
                             content=_tool_result_text(result, image_count),
@@ -349,42 +403,16 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not clean_reply:
             remaining_calls = _extract_tool_calls(response)
             if remaining_calls:
-                logger.warning(
-                    "Model returned unresolved tool calls after execution loop user=%s calls=%s",
-                    uid,
-                    [call.get("name") for call in remaining_calls],
-                )
-                clean_reply = "Tool operation complete nahi ho paaya. Please request ko ek baar dobara try karo."
+                clean_reply = "Tool operation complete nahi ho paaya. Ek baar dobara try karo."
+            else:
+                clean_reply = "hmm bol na."
+        return clean_reply
 
     except BotError:
-        logger.exception("conversation generation failed user=%s", uid)
+        logger.exception("groq path failed user=%s", uid)
         await update.message.reply_text("Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo.")
-        return
+        return None
     except Exception:
-        logger.exception("conversation generation failed user=%s", uid)
+        logger.exception("groq path failed user=%s", uid)
         await update.message.reply_text("AI response generate nahi ho paaya. Thodi der mein dobara try karo.")
-        return
-
-    history.extend([HumanMessage(content=user_text), AIMessage(content=clean_reply)])
-    try:
-        memory.save_history(uid, history, config.MAX_HISTORY_MESSAGES)
-    except Exception:
-        logger.exception("conversation history persistence failed user=%s", uid)
-
-    if clean_reply:
-        await send_long_text(update, clean_reply)
-
-    try:
-        if should_extract(user_text):
-            existing_profile = memory.get_profile(uid) or {}
-            new_profile = await extract_and_merge(
-                llm, existing_profile, user_text, clean_reply
-            )
-            memory.set_profile(uid, new_profile)
-    except Exception:
-        logger.exception("learning extraction failed user=%s", uid)
-
-    try:
-        await maybe_update_session_summary(llm, memory, uid, user_text, clean_reply)
-    except Exception:
-        logger.exception("session summary update failed user=%s", uid)
+        return None
