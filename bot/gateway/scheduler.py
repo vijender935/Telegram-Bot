@@ -67,3 +67,10 @@ async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
                 logger.info("Sent proactive ping to %s", user_id)
         except Exception:
             logger.exception("Proactive ping failed for %s", user_id)
+
+
+
+def start_scheduler(app, memory=None) -> None:
+    """Register the proactive ping job on Telegram's JobQueue."""
+    if app.job_queue:
+        app.job_queue.run_repeating(proactive_ping, interval=3600 * 6, first=3600)
