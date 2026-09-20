@@ -288,7 +288,13 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                                                 delivered,
                                                 uid,
                                             )
-                                            result = image_result
+                                            # Do not pass a potentially huge base64/stringified image payload
+                                            # back into the LLM context after successful delivery.
+                                            result = {
+                                                "key": keys[0],
+                                                "image_retrieved": True,
+                                                "images_delivered": delivered,
+                                            }
                                     except Exception:
                                         logger.exception(
                                             "automatic get_image failed key=%s user=%s",
