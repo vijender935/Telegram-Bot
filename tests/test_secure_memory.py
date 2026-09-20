@@ -1,4 +1,4 @@
-from bot.infra.memory import MemoryStore
+from bot.infrastructure.memory import MemoryStore
 from bot.domain.memory.service import MemoryService
 from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
 
