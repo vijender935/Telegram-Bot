@@ -70,7 +70,7 @@ async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
 
 
 
-def start_scheduler(app, memory=None) -> None:
+def start_scheduler(app) -> None:
     """Register the proactive ping job on Telegram's JobQueue."""
     if app.job_queue:
         app.job_queue.run_repeating(proactive_ping, interval=3600 * 6, first=3600)
