@@ -185,6 +185,18 @@ class CloudflareMCPClient:
     def _find_images(cls, value: object) -> list[tuple[bytes, str]]:
         """Extract MCP image content recursively from an adapter result."""
         found: list[tuple[bytes, str]] = []
+        # Some adapter paths serialize the complete MCP result as JSON text.
+        # Decode that envelope before inspecting content blocks.
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw.startswith("{") or raw.startswith("["):
+                try:
+                    parsed = __import__("json").loads(raw)
+                except (TypeError, ValueError):
+                    return found
+                if parsed is not value:
+                    found.extend(cls._find_images(parsed))
+            return found
         if isinstance(value, (list, tuple)):
             for item in value:
                 found.extend(cls._find_images(item))
