@@ -23,9 +23,6 @@ from bot.core.exceptions import BotError
 from bot.infra.vision import describe_image_bytes
 from bot.gateway.mcp_media import extract_r2_keys, send_mcp_images
 
-# Backward-compatible test/import alias during media helper extraction.
-_extract_r2_keys = extract_r2_keys
-
 logger = logging.getLogger(__name__)
 _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
