@@ -14,7 +14,6 @@ def format_last_media(media: dict | None) -> str:
         lines.append(f"- What it shows: {desc}")
     if reaction:
         lines.append(f"- User reaction: {reaction}")
-    lines.append("- Talk about this media naturally as if YOU sent it to seduce him.")
     return "\n".join(lines)
 
 
@@ -23,10 +22,3 @@ def format_session_summary(summary: str | None) -> str:
     if not s:
         return "(no session summary yet)"
     return s[:800]
-
-
-def format_active_fantasy(text: str | None) -> str:
-    t = (text or "").strip()
-    if not t:
-        return "(none)"
-    return t[:500]

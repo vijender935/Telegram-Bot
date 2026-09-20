@@ -1,4 +1,4 @@
-"""User preference learning — adaptive profile growth without model fine-tuning."""
+"""User preference learning — stable profile growth without model fine-tuning."""
 from __future__ import annotations
 
 import json
@@ -12,18 +12,14 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "name": None,
     "language": None,
     "reply_style": None,
-    "kinks": [],
-    "soft_limits": [],
     "likes": [],
     "dislikes": [],
-    "ongoing_fantasy": None,
     "notes": [],
-    "persona_evolution": [],
 }
 
 REMEMBER_PATTERNS = (
     r"\byaad\s*rakh\b", r"\bremember\b", r"\bmujhe\s+pasand\b", r"\bi\s+like\b",
-    r"\bi\s+love\b", r"\bmeri\s+fantasy\b", r"\bmera\s+naam\b", r"\bcall\s+me\b",
+    r"\bi\s+love\b", r"\bmera\s+naam\b", r"\bcall\s+me\b",
     r"\bprefer\b", r"\bpasand\s+(?:nahi|nahin)\s+hai\b", r"\bpasand\s+hai\b",
     r"\b(?:mujhe|main)\s+(?:hamesha|usually|generally)\b",
     r"\b(?:mujhe|main)\s+(?:short|long|detailed|detail)\b",
@@ -56,8 +52,6 @@ def profile_to_prompt_text(profile: dict | None) -> str:
         lines.append(f"- Dislikes: {', '.join(profile['dislikes'][:6])}")
     if profile.get("notes"):
         lines.append(f"- Notes: {'; '.join(profile['notes'][:6])}")
-    if profile.get("persona_evolution"):
-        lines.append(f"- Learned style: {'; '.join(profile['persona_evolution'][:6])}")
     return "\n".join(lines) if lines else "(profile almost empty)"
 
 
@@ -78,11 +72,11 @@ def should_extract(user_text: str) -> bool:
 def merge_profiles(old: dict, new: dict) -> dict:
     out = empty_profile()
     out.update({k: old.get(k) for k in DEFAULT_PROFILE if k in (old or {})})
-    for key in ("name", "language", "reply_style", "ongoing_fantasy"):
+    for key in ("name", "language", "reply_style"):
         val = new.get(key)
         if val:
             out[key] = val
-    for key in ("kinks", "soft_limits", "likes", "dislikes", "notes", "persona_evolution"):
+    for key in ("likes", "dislikes", "notes"):
         seen = []
         for item in (out.get(key) or []) + (new.get(key) or []):
             s = str(item).strip()

@@ -1,4 +1,4 @@
-"""Build rich, relevance-ranked context for the conversation engine."""
+"""Build relevance-ranked context for the conversation engine."""
 from __future__ import annotations
 
 import logging
@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from bot import config
-from bot.domain.media_context import format_last_media, format_session_summary, format_active_fantasy
+from bot.domain.media_context import format_last_media, format_session_summary
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +27,9 @@ def _format_relevant_memories(memory, user_id: int, query: str, limit: int = 5) 
 
 
 def build_context_packet(memory, user_id: int, user_text: str = "") -> dict[str, Any]:
-    emotion = memory.get_emotion(user_id)
     last_media = memory.get_last_media(user_id)
     session_summary, msg_count = memory.get_session(user_id)
-    fantasy = memory.get_fantasy(user_id)
     profile = memory.get_profile(user_id)
-    mood = memory.get_mood(user_id)
-
-    if last_media and user_text and emotion in ("horny", "eager", "dominant"):
-        memory.set_last_media_reaction(user_id, user_text[:120])
 
     now = datetime.now()
     hour = now.hour
@@ -49,15 +43,12 @@ def build_context_packet(memory, user_id: int, user_text: str = "") -> dict[str,
         time_ctx = "late night"
 
     return {
-        "mood": mood,
         "profile": profile,
-        "emotion": emotion,
         "session_summary": session_summary,
         "msg_count": msg_count,
         "last_media": last_media,
         "last_media_text": format_last_media(last_media),
         "session_summary_text": format_session_summary(session_summary),
-        "fantasy_text": format_active_fantasy(fantasy),
         "memory_context_text": _format_relevant_memories(memory, user_id, user_text),
         "time_context": time_ctx,
     }
@@ -88,15 +79,8 @@ async def maybe_update_session_summary(llm, memory, user_id: int, user_text: str
         logger.exception("session summary failed")
 
 
-def media_followup_lines(description: str, mood: str) -> str:
+def media_followup_lines(description: str) -> str:
     """Short follow-up after media delivery."""
     desc = (description or "").strip()
     snippet = desc[:180] + ("…" if len(desc) > 180 else "")
-    mood_l = (mood or "").lower()
-    if "soft" in mood_l or "romantic" in mood_l:
-        return f"yeh sirf tumhare liye…\n{snippet}\n\nbatao kaisi lagi?"
-    if "rough" in mood_l or "punish" in mood_l or "femdom" in mood_l:
-        return f"yeh dekho…\n{snippet}\n\nbatao, next kya chahiye?"
-    if "horny" in mood_l or "dirty" in mood_l:
-        return f"uff, yeh dekho…\n{snippet}\n\nbatao, tumhara kya scene hai? 😈"
     return f"yeh dekho…\n{snippet}\n\nbatao, kaisa laga?"
