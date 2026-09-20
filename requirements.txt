@@ -1,5 +1,6 @@
 # Runtime
 python-telegram-bot>=21.0,<22.0
+APScheduler>=3.10,<4.0
 
 # AI / orchestration
 langchain==0.3.20
