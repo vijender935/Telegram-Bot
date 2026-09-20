@@ -7,9 +7,9 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from bot import config
 from bot.gateway.formatters import send_long_text
-from bot.infra.transcribe import transcribe_audio
-from bot.infra.media_describe import describe_media_path, is_image, is_video
-from bot.infra.tts import generate_voice_note
+from bot.infrastructure.transcribe import transcribe_audio
+from bot.infrastructure.media_describe import describe_media_path, is_image, is_video
+from bot.infrastructure.tts import generate_voice_note
 from bot.domain.orchestrator import build_context_packet, media_followup_lines
 from bot.agent.chat_agent import build_chat_agent
 from bot.agent.tools import build_tools
@@ -89,7 +89,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif is_video and groq_key:
             status = await update.message.reply_text("🎬 Video se audio nikaal raha hoon…")
             try:
-                from bot.infra.transcribe import extract_audio_from_video
+                from bot.infrastructure.transcribe import extract_audio_from_video
                 audio = extract_audio_from_video(data)
                 await status.delete()
                 await _transcribe_and_reply(update, context, audio, "audio.mp3", f"video: {name}")
@@ -141,7 +141,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await tg_file.download_to_memory(buf)
         status = await update.message.reply_text("🎬 Video se audio nikaal raha hoon…")
         try:
-            from bot.infra.transcribe import extract_audio_from_video
+            from bot.infrastructure.transcribe import extract_audio_from_video
             audio = extract_audio_from_video(buf.getvalue())
             await status.delete()
             await _transcribe_and_reply(update, context, audio, "audio.mp3", f"video: {name}")
@@ -161,7 +161,7 @@ async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await tg_file.download_to_memory(buf)
         status = await update.message.reply_text("🎬 Video note process ho raha hai…")
         try:
-            from bot.infra.transcribe import extract_audio_from_video
+            from bot.infrastructure.transcribe import extract_audio_from_video
             audio = extract_audio_from_video(buf.getvalue())
             await status.delete()
             await _transcribe_and_reply(update, context, audio, "audio.mp3", "video note")
