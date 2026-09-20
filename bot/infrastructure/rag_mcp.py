@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
 logger = logging.getLogger(__name__)
 
@@ -142,11 +144,36 @@ class CloudflareMCPClient:
         return {"status": "ok", "result": str(result)}
 
     async def invoke(self, tool_name: str, args: dict | None = None) -> object:
-        """Invoke one dynamically discovered custom MCP tool."""
+        """Invoke one dynamically discovered custom MCP tool through LangChain."""
         tool = self.tool_map.get(tool_name)
         if not tool:
             raise RuntimeError(f"Cloudflare MCP tool unavailable: {tool_name}")
         return await asyncio.wait_for(tool.ainvoke(args or {}), timeout=self.timeout)
+
+    async def invoke_raw(self, tool_name: str, args: dict | None = None) -> object:
+        """Call the custom MCP server directly and preserve raw MCP content blocks.
+
+        The LangChain adapter can collapse a multimodal MCP result into a plain
+        string when a StructuredTool is invoked directly with a normal dict.
+        Image retrieval therefore uses the MCP SDK's ClientSession path so the
+        original ImageContent block remains available to the Telegram delivery
+        layer. This still talks exclusively to the user's custom Cloudflare MCP.
+        """
+        if not self.configured:
+            raise RuntimeError("Cloudflare MCP URL is not configured")
+
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        async with streamablehttp_client(self.url, headers=headers) as (
+            read_stream,
+            write_stream,
+            _,
+        ):
+            async with ClientSession(read_stream, write_stream) as session:
+                await asyncio.wait_for(session.initialize(), timeout=self.timeout)
+                return await asyncio.wait_for(
+                    session.call_tool(tool_name, arguments=args or {}),
+                    timeout=self.timeout,
+                )
 
     @staticmethod
     def _field(value: object, name: str) -> object:
