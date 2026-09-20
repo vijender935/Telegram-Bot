@@ -30,7 +30,8 @@ _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 def _strip_tool_image_markup(text: str) -> str:
     """Remove image markdown emitted by MCP tools before it reaches the LLM."""
-    return re.sub(r"!\[[^\]]*\]\([^\n]*?\)", "", text).strip()
+    return re.sub(r"![[^]]*]([^
+]*?)", "", text).strip()
 
 
 def _tool_result_text(result: object, image_count: int = 0) -> str:
@@ -42,7 +43,8 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
             if getattr(item, "type", None) == "image":
                 continue
             parts.append(_tool_result_text(item, image_count=0))
-        text = "\n".join(x for x in parts if x)
+        text = "
+".join(x for x in parts if x)
     elif isinstance(result, dict):
         safe = {
             k: v for k, v in result.items()
@@ -54,7 +56,8 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
 
     text = _strip_tool_image_markup(text)
     if image_count:
-        text = (text + "\n" if text else "") + f"{image_count} image(s) retrieved and sent to the user."
+        text = (text + "
+" if text else "") + f"{image_count} image(s) retrieved and sent to the user."
     return text[:4000]
 
 
@@ -163,7 +166,7 @@ async def _run_chat_path(
 
         chain, _, _ = build_chat_agent_with_components(
             llm,
-            tools=[],  # no tools on chat path — keeps Gemini natural
+            tools=[],
             user_profile=ctx["profile"],
             session_summary=ctx["session_summary_text"],
             last_media=ctx["last_media_text"],
@@ -183,7 +186,6 @@ async def _run_chat_path(
         return None
     except Exception:
         logger.exception("gemini chat failed user=%s — falling back to groq", uid)
-        # soft fallback to tools path without tools
         return await _run_tools_path(
             update, context, uid, user_text, ctx, llm_history, memory,
             None, [], force_chat_mode=True,
@@ -206,6 +208,11 @@ async def _execute_tool_calls(
 
     for _ in range(6):
         tool_calls = _extract_tool_calls(response)
+        logger.info(
+            "groq tool loop user=%s calls=%s",
+            uid,
+            [call.get("name") for call in tool_calls],
+        )
         if not tool_calls:
             break
 
@@ -333,6 +340,12 @@ async def _run_tools_path(
         sandbox_path=config.SANDBOX_PATH,
         mcp_tools=mcp_tools if not force_chat_mode else [],
     )
+    logger.info(
+        "groq tools user=%s count=%s names=%s",
+        uid,
+        len(tools),
+        [getattr(tool, "name", type(tool).__name__) for tool in tools],
+    )
     mode = "chat" if force_chat_mode else "tools"
     chain, system_message, tool_model = build_chat_agent_with_components(
         llm, tools,
@@ -348,6 +361,14 @@ async def _run_tools_path(
     try:
         response = await chain.ainvoke(
             {"input": user_text, "chat_history": llm_history}
+        )
+        initial_tool_calls = _extract_tool_calls(response)
+        logger.info(
+            "groq initial response user=%s type=%s tool_calls=%s content=%r",
+            uid,
+            type(response).__name__,
+            [call.get("name") for call in initial_tool_calls],
+            str(getattr(response, "content", ""))[:500],
         )
         response = await _execute_tool_calls(
             update,
