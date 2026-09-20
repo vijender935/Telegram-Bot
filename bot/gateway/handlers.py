@@ -265,7 +265,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                                 get_image_tool = tool_map.get("get_image")
                                 if get_image_tool:
                                     try:
-                                        image_result = await get_image_tool.ainvoke({"key": keys[0]})
+                                        image_result = await cloudflare_mcp.invoke_raw("get_image", {"key": keys[0]})
                                         logger.info(
                                             "get_image returned type=%s content_type=%s artifact_type=%s user=%s",
                                             type(image_result).__name__,
