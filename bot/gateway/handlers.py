@@ -13,7 +13,7 @@ from bot import config
 from bot.gateway.formatters import send_long_text
 from bot.domain.orchestrator import build_context_packet, maybe_update_session_summary
 from bot.domain.learning import should_extract, extract_and_merge
-from bot.agent.chat_agent import build_chat_agent
+from bot.agent.chat_agent import build_chat_agent_with_components
 from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
@@ -168,7 +168,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
         sandbox_path=config.SANDBOX_PATH,
         mcp_tools=mcp_tools,
     )
-    chain = build_chat_agent(
+    chain, system_message, tool_model = build_chat_agent_with_components(
         llm, tools,
         current_mood=ctx["mood"], user_profile=ctx["profile"],
         session_summary=ctx["session_summary_text"], last_media=ctx["last_media_text"],
@@ -216,10 +216,19 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                         content=f"Tool execution failed ({type(exc).__name__}). Do not pretend it succeeded.",
                         tool_call_id=call.get("id", "unknown"),
                     ))
-            response = await chain.ainvoke({
-                "input": user_text,
-                "chat_history": llm_history + [response] + tool_messages,
-            })
+            # Preserve the required tool-calling message order:
+            # user -> assistant(tool_calls) -> tool(result) -> assistant.
+            # The prompt chain appends {input} at the end, so using it here
+            # would put the user message after the ToolMessage and can cause
+            # the model to repeat the same tool call. Invoke the bound model
+            # directly with the correctly ordered message history instead.
+            response = await tool_model.ainvoke([
+                system_message,
+                *llm_history,
+                HumanMessage(content=user_text),
+                response,
+                *tool_messages,
+            ])
 
         full_reply = getattr(response, "content", None)
         clean_reply = str(full_reply).strip() if full_reply else ""
