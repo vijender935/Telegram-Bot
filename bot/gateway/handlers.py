@@ -390,57 +390,6 @@ async def _run_tools_path(
                 clean_reply = "hmm bol na."
         return clean_reply
 
-async def _run_tools_path(
-    update, context, uid, user_text, ctx, llm_history, memory,
-    cloudflare_mcp, mcp_tools, force_chat_mode: bool = False,
-) -> str | None:
-    """Groq path — tools + technical prompt."""
-    llm = context.application.bot_data.get("llm") or build_groq_llm()
-    response_policy = infer_response_policy(user_text, ctx["profile"])
-    tools = build_tools(
-        memory=memory,
-        user_id=uid,
-        sandbox_path=config.SANDBOX_PATH,
-        mcp_tools=mcp_tools if not force_chat_mode else [],
-    )
-    mode = "chat" if force_chat_mode else "tools"
-    chain, system_message, tool_model = build_chat_agent_with_components(
-        llm, tools,
-        user_profile=ctx["profile"],
-        session_summary=ctx["session_summary_text"],
-        last_media=ctx["last_media_text"],
-        time_context=ctx["time_context"],
-        memory_context=ctx.get("memory_context_text", ""),
-        response_policy=response_policy.to_prompt(),
-        mode=mode,
-    )
-
-    try:
-        response = await chain.ainvoke(
-            {"input": user_text, "chat_history": llm_history}
-        )
-        response = await _execute_tool_calls(
-            update,
-            uid,
-            response,
-            tools,
-            tool_model,
-            system_message,
-            llm_history,
-            user_text,
-            cloudflare_mcp,
-        )
-
-        full_reply = getattr(response, "content", None)
-        clean_reply = str(full_reply).strip() if full_reply else ""
-        if not clean_reply:
-            remaining_calls = _extract_tool_calls(response)
-            if remaining_calls:
-                clean_reply = "Tool operation complete nahi ho paaya. Ek baar dobara try karo."
-            else:
-                clean_reply = "hmm bol na."
-        return clean_reply
-
     except BotError:
         logger.exception("groq path failed user=%s", uid)
         await update.message.reply_text(
