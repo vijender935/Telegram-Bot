@@ -182,12 +182,10 @@ async def run_bot() -> None:
     asyncio.create_task(initialize_mcp_background(), name="cloudflare-mcp-init")
 
     logger.info(
-        "Bot v3 ready | groq=%s | gemini=%s enabled=%s | mcp=%s tools=%s",
+        "Bot v3 ready | groq=%s | gemini=%s enabled=%s | mcp_init=background",
         config.GROQ_MODEL,
         config.GEMINI_MODEL,
         config.GEMINI_ENABLED and gemini_llm is not None,
-        cloudflare_mcp.available,
-        sorted(cloudflare_mcp.tool_map),
     )
 
     webhook_url = f"{config.TELEGRAM_WEBHOOK_URL}/telegram"
