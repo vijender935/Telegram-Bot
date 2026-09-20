@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from bot.agent.prompts import CHAT_SYSTEM_PROMPT
+from bot.agent.prompts import TOOL_SYSTEM_PROMPT
 from bot.domain.learning import profile_to_prompt_text
 from bot.domain.orchestrator import build_context_packet
 
@@ -41,7 +41,7 @@ async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
                 [
                     (
                         "system",
-                        CHAT_SYSTEM_PROMPT
+                        TOOL_SYSTEM_PROMPT
                         + "\n\n## Task\n"
                         "Generate one short, natural proactive message to start a conversation. "
                         "Use the supplied context only when relevant. Do not mention internal context or tags.",
