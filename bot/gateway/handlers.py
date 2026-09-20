@@ -17,6 +17,7 @@ from bot.agent.chat_agent import build_chat_agent_with_components
 from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
+from bot.infra.vision import describe_image_bytes
 
 logger = logging.getLogger(__name__)
 _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -47,7 +48,11 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
     return text[:4000]
 
 
-async def _send_mcp_images(update: Update, images: list[tuple[bytes, str]]) -> int:
+async def _send_mcp_images(
+    update: Update,
+    images: list[tuple[bytes, str]],
+    caption: str | None = None,
+) -> int:
     """Validate/normalize MCP images before sending them through Telegram."""
     sent = 0
     for index, (data, mime_type) in enumerate(images, start=1):
@@ -82,11 +87,13 @@ async def _send_mcp_images(update: Update, images: list[tuple[bytes, str]]) -> i
                 await update.message.reply_document(
                     document=io.BytesIO(payload),
                     filename=filename,
+                    caption=caption if sent == 0 else None,
                 )
             else:
                 await update.message.reply_photo(
                     photo=io.BytesIO(payload),
                     filename=filename,
+                    caption=caption if sent == 0 else None,
                 )
             sent += 1
         except (UnidentifiedImageError, OSError, ValueError) as exc:
@@ -103,6 +110,7 @@ async def _send_mcp_images(update: Update, images: list[tuple[bytes, str]]) -> i
                 await update.message.reply_document(
                     document=io.BytesIO(data),
                     filename=f"cloudflare_image_{index}.bin",
+                    caption=caption if sent == 0 else None,
                 )
                 sent += 1
             except Exception:
@@ -315,14 +323,38 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                                                     uid,
                                                 )
                                             else:
-                                                delivered = await _send_mcp_images(update, fetched)
+                                                caption = None
+                                                try:
+                                                    caption = await describe_image_bytes(
+                                                        fetched[0][0],
+                                                        "cloudflare_image_1.jpg",
+                                                    )
+                                                    caption = caption.strip()[:1024] or None
+                                                    logger.info(
+                                                        "generated image caption chars=%s key=%s user=%s",
+                                                        len(caption or ""),
+                                                        key,
+                                                        uid,
+                                                    )
+                                                except Exception:
+                                                    logger.exception(
+                                                        "image caption generation failed key=%s user=%s",
+                                                        key,
+                                                        uid,
+                                                    )
+                                                delivered = await _send_mcp_images(
+                                                    update,
+                                                    fetched,
+                                                    caption=caption,
+                                                )
                                                 if delivered:
                                                     delivered_r2_keys.add(key)
                                                 image_count += delivered
                                                 logger.info(
-                                                    "auto-delivered search result key=%s images=%s user=%s",
+                                                    "auto-delivered search result key=%s images=%s caption=%s user=%s",
                                                     key,
                                                     delivered,
+                                                    bool(caption),
                                                     uid,
                                                 )
                                             result = image_result
