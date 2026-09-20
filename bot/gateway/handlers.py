@@ -256,12 +256,29 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                         # relying on the LLM to remember a second tool call.
                         if call.get("name") == "search_images":
                             keys = _extract_r2_keys(result)
+                            logger.info(
+                                "search_images extracted_r2_keys=%s user=%s",
+                                keys[:5],
+                                uid,
+                            )
                             if keys:
                                 get_image_tool = tool_map.get("get_image")
                                 if get_image_tool:
                                     try:
                                         image_result = await get_image_tool.ainvoke({"key": keys[0]})
+                                        logger.info(
+                                            "get_image returned type=%s content_type=%s artifact_type=%s user=%s",
+                                            type(image_result).__name__,
+                                            type(getattr(image_result, "content", None)).__name__,
+                                            type(getattr(image_result, "artifact", None)).__name__,
+                                            uid,
+                                        )
                                         fetched = cloudflare_mcp.extract_images(image_result)
+                                        logger.info(
+                                            "get_image extracted_mcp_images=%s user=%s",
+                                            len(fetched),
+                                            uid,
+                                        )
                                         if fetched:
                                             delivered = await _send_mcp_images(update, fetched)
                                             image_count += delivered
