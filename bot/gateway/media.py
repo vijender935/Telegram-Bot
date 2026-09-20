@@ -6,7 +6,6 @@ from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage
 
 from bot import config
-from bot.gateway.base import _allowed
 from bot.gateway.formatters import send_long_text, send_local_file
 from bot.infra.transcribe import transcribe_audio
 from bot.infra.media_describe import describe_media_path, is_image, is_video
@@ -18,8 +17,6 @@ from bot.agent.tools import build_tools
 logger = logging.getLogger(__name__)
 
 async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
     uid = update.effective_user.id
     memory = context.application.bot_data["memory"]
     history = memory.get_history(uid)
