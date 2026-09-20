@@ -3,7 +3,6 @@ from pathlib import Path
 from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
 
 
-
 def test_semantic_index_persists_metadata(tmp_path: Path):
     index = SemanticIndex(str(tmp_path / "vectors.db"))
     index.upsert("1", "mountain trip photo")
