@@ -61,9 +61,6 @@ async def _send_mcp_images(
 
         filename = f"cloudflare_image_{index}.jpg"
         try:
-            # Telegram can return Image_process_failed for valid-looking bytes
-            # that are malformed, unsupported, or awkwardly encoded. Decode the
-            # actual image first, then normalize it to a standard JPEG payload.
             with Image.open(io.BytesIO(data)) as source:
                 source.load()
                 width, height = source.size
@@ -82,8 +79,6 @@ async def _send_mcp_images(
                 payload = buffer.getvalue()
 
             if len(payload) > 10 * 1024 * 1024:
-                # Do not feed an oversized payload to send_photo. Telegram's
-                # document path gives us a safer fallback for large results.
                 await update.message.reply_document(
                     document=io.BytesIO(payload),
                     filename=filename,
@@ -104,8 +99,6 @@ async def _send_mcp_images(
                 len(data),
                 exc,
             )
-            # Last-resort delivery: if Telegram can accept the bytes as a file,
-            # do not lose the image merely because photo processing failed.
             try:
                 await update.message.reply_document(
                     document=io.BytesIO(data),
@@ -223,19 +216,15 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     chain, system_message, tool_model = build_chat_agent_with_components(
         llm, tools,
-        current_mood=ctx["mood"], user_profile=ctx["profile"],
+        user_profile=ctx["profile"],
         session_summary=ctx["session_summary_text"], last_media=ctx["last_media_text"],
-        active_fantasy=ctx["fantasy_text"], emotion=ctx["emotion"], time_context=ctx["time_context"],
+        time_context=ctx["time_context"],
         memory_context=ctx.get("memory_context_text", ""),
         response_policy=response_policy.to_prompt(),
     )
 
     try:
         response = await chain.ainvoke({"input": user_text, "chat_history": llm_history})
-        # Tool execution must be idempotent within one user turn. A provider
-        # retry or an agent loop can emit the same tool call more than once;
-        # re-running it can duplicate external side effects such as sending
-        # the same image to Telegram.
         executed_tool_results: dict[tuple[str, str], object] = {}
         delivered_r2_keys: set[str] = set()
 
@@ -285,10 +274,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                                 uid,
                             )
 
-                        # search_images returns metadata, not image bytes. For an
-                        # image-search request, deterministically fetch the first
-                        # exact R2 key through the same custom MCP instead of
-                        # relying on the LLM to remember a second tool call.
                         if call.get("name") == "search_images":
                             keys = _extract_r2_keys(result)
                             logger.info(
@@ -301,19 +286,7 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                                 if get_image_tool:
                                     try:
                                         image_result = await cloudflare_mcp.invoke_raw("get_image", {"key": keys[0]})
-                                        logger.info(
-                                            "get_image returned type=%s content_type=%s artifact_type=%s user=%s",
-                                            type(image_result).__name__,
-                                            type(getattr(image_result, "content", None)).__name__,
-                                            type(getattr(image_result, "artifact", None)).__name__,
-                                            uid,
-                                        )
                                         fetched = cloudflare_mcp.extract_images(image_result)
-                                        logger.info(
-                                            "get_image extracted_mcp_images=%s user=%s",
-                                            len(fetched),
-                                            uid,
-                                        )
                                         if fetched:
                                             key = keys[0]
                                             if key in delivered_r2_keys:
@@ -330,12 +303,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                                                         "cloudflare_image_1.jpg",
                                                     )
                                                     caption = caption.strip()[:1024] or None
-                                                    logger.info(
-                                                        "generated image caption chars=%s key=%s user=%s",
-                                                        len(caption or ""),
-                                                        key,
-                                                        uid,
-                                                    )
                                                 except Exception:
                                                     logger.exception(
                                                         "image caption generation failed key=%s user=%s",
@@ -350,13 +317,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                                                 if delivered:
                                                     delivered_r2_keys.add(key)
                                                 image_count += delivered
-                                                logger.info(
-                                                    "auto-delivered search result key=%s images=%s caption=%s user=%s",
-                                                    key,
-                                                    delivered,
-                                                    bool(caption),
-                                                    uid,
-                                                )
                                             result = image_result
                                     except Exception:
                                         logger.exception(
@@ -376,12 +336,6 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                         content=f"Tool execution failed ({type(exc).__name__}). Do not pretend it succeeded.",
                         tool_call_id=call.get("id", "unknown"),
                     ))
-            # Preserve the required tool-calling message order:
-            # user -> assistant(tool_calls) -> tool(result) -> assistant.
-            # The prompt chain appends {input} at the end, so using it here
-            # would put the user message after the ToolMessage and can cause
-            # the model to repeat the same tool call. Invoke the bound model
-            # directly with the correctly ordered message history instead.
             response = await tool_model.ainvoke([
                 system_message,
                 *llm_history,

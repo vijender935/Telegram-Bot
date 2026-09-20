@@ -28,7 +28,6 @@ GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b").strip()
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "1200"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 
-
 SERIAL_MAP_TTL_SECONDS = int(os.getenv("SERIAL_MAP_TTL_SECONDS", str(30 * 60)))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
 LLM_HISTORY_MESSAGES = int(os.getenv("LLM_HISTORY_MESSAGES", "8"))
@@ -38,13 +37,9 @@ MEDIA_DESCRIBE_ON_DOWNLOAD = os.getenv("MEDIA_DESCRIBE_ON_DOWNLOAD", "true").low
 MEDIA_FOLLOWUP = os.getenv("MEDIA_FOLLOWUP", "true").lower() in ("1", "true", "yes")
 
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "20"))
-VAULT_MAX_ATTEMPTS = int(os.getenv("VAULT_MAX_ATTEMPTS", "5"))
-VAULT_LOCKOUT_SECONDS = int(os.getenv("VAULT_LOCKOUT_SECONDS", "900"))
-VAULT_SESSION_SECONDS = int(os.getenv("VAULT_SESSION_SECONDS", "900"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # User-owned custom Cloudflare MCP only.
-# It exposes the ai-images-pilot Worker through R2 + D1 + Vectorize.
 CLOUDFLARE_MCP_URL = os.getenv(
     "CLOUDFLARE_MCP_URL",
     "https://cloudflare-mcp.vijender935.workers.dev/mcp",
@@ -54,8 +49,6 @@ CLOUDFLARE_MCP_TIMEOUT_SECONDS = float(os.getenv("CLOUDFLARE_MCP_TIMEOUT_SECONDS
 CLOUDFLARE_MCP_RETRIES = int(os.getenv("CLOUDFLARE_MCP_RETRIES", "3"))
 CLOUDFLARE_MCP_ENABLED = os.getenv("CLOUDFLARE_MCP_ENABLED", "true").lower() in ("1", "true", "yes")
 
-# Render-safe Telegram webhook. Polling is intentionally disabled because Render's
-# zero-downtime deploys briefly run old and new instances side-by-side.
 TELEGRAM_WEBHOOK_URL = os.getenv("TELEGRAM_WEBHOOK_URL", "https://telegram-bot-hnzl.onrender.com").rstrip("/")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
 
