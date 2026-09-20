@@ -111,6 +111,51 @@ async def _send_mcp_images(update: Update, images: list[tuple[bytes, str]]) -> i
     return sent
 
 
+def _extract_r2_keys(value: object) -> list[str]:
+    """Extract exact R2 keys from a search/list result without guessing."""
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: object) -> None:
+        if not isinstance(value, str) or not value or value in seen:
+            return
+        seen.add(value)
+        found.append(value)
+
+    def walk(item: object) -> None:
+        if isinstance(item, str):
+            raw = item.strip()
+            if raw.startswith("{") or raw.startswith("["):
+                try:
+                    walk(json.loads(raw))
+                except json.JSONDecodeError:
+                    pass
+            return
+        if isinstance(item, (list, tuple)):
+            for child in item:
+                walk(child)
+            return
+        if isinstance(item, dict):
+            for key_name in ("r2_key", "r2Key"):
+                value = item.get(key_name)
+                if isinstance(value, str):
+                    add(value)
+            metadata = item.get("metadata")
+            if metadata is not None:
+                walk(metadata)
+            for key_name in ("matches", "images", "results", "content"):
+                child = item.get(key_name)
+                if child is not None:
+                    walk(child)
+            return
+        content = getattr(item, "content", None)
+        if content is not None and content is not item:
+            walk(content)
+
+    walk(value)
+    return found
+
+
 def _extract_tool_calls(response: object) -> list[dict]:
     """Normalize LangChain tool calls across provider/adaptor message shapes."""
     calls = getattr(response, "tool_calls", None) or []
@@ -204,6 +249,35 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                                 call.get("name"),
                                 uid,
                             )
+
+                        # search_images returns metadata, not image bytes. For an
+                        # image-search request, deterministically fetch the first
+                        # exact R2 key through the same custom MCP instead of
+                        # relying on the LLM to remember a second tool call.
+                        if call.get("name") == "search_images":
+                            keys = _extract_r2_keys(result)
+                            if keys:
+                                get_image_tool = tool_map.get("get_image")
+                                if get_image_tool:
+                                    try:
+                                        image_result = await get_image_tool.ainvoke({"key": keys[0]})
+                                        fetched = cloudflare_mcp.extract_images(image_result)
+                                        if fetched:
+                                            delivered = await _send_mcp_images(update, fetched)
+                                            image_count += delivered
+                                            logger.info(
+                                                "auto-delivered search result key=%s images=%s user=%s",
+                                                keys[0],
+                                                delivered,
+                                                uid,
+                                            )
+                                            result = image_result
+                                    except Exception:
+                                        logger.exception(
+                                            "automatic get_image failed key=%s user=%s",
+                                            keys[0],
+                                            uid,
+                                        )
                     tool_messages.append(
                         ToolMessage(
                             content=_tool_result_text(result, image_count),
