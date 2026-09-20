@@ -163,6 +163,21 @@ class CloudflareMCPClient:
                 found.extend(cls._find_images(item))
             return found
 
+        # Some MCP/LangChain adapter combinations flatten a non-text MCP
+        # result into a JSON string instead of preserving ImageContent as a
+        # structured object/artifact. Parse JSON strings so the image payload
+        # is still recoverable without changing the custom MCP contract.
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw.startswith("{") or raw.startswith("["):
+                try:
+                    parsed = __import__("json").loads(raw)
+                except (TypeError, ValueError):
+                    return found
+                if parsed is not value:
+                    found.extend(cls._find_images(parsed))
+            return found
+
         if isinstance(value, dict):
             if value.get("type") == "image" and value.get("data"):
                 try:
