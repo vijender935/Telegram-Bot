@@ -13,12 +13,11 @@ from bot import config
 
 logger = logging.getLogger(__name__)
 
-DESCRIBE_PROMPT = """Write only a short caption for this image for a private, flirty Hinglish chat.
+DESCRIBE_PROMPT = """Describe this image for a private, flirty Hinglish chat.
 Rules:
-- Return only the caption; no preamble, explanation, follow-up, or suggestions.
 - 2 to 4 short sentences. Use Hinglish (Hindi + English).
 - Be sensory and a bit teasing. If it's a person, compliment their vibe, pose, or what they're wearing in a flirty way.
-- Focus on mood, lighting, clothing (or lack of), and the energy of the photo.
+- Focus on: mood, lighting, clothing (or lack of), and the 'energy' of the photo.
 - Don't just list items; talk like you're looking at the photo with them.
 - No AI disclaimers. No moralizing.
 - Example: "Wah, yeh black dress toh kaafi hot lag rahi hai tumpe. Lighting bhi ekdum perfect hai, mood bana rahi hai..."
