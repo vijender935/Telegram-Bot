@@ -31,7 +31,7 @@ from bot.infrastructure.rag_mcp import CloudflareMCPClient
 from bot.domain.memory.service import MemoryService
 from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
 from bot.core.rate_limit import SlidingWindowRateLimiter
-from bot.scheduler import start_scheduler
+from bot.gateway.scheduler import start_scheduler
 
 configure_logging(config.LOG_LEVEL)
 logger = logging.getLogger(__name__)
