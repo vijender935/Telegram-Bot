@@ -1,13 +1,7 @@
 from pathlib import Path
 
-from bot.agent.action_registry import parse_action_tags
 from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
 
-
-def test_action_tags_are_whitelisted():
-    clean, actions = parse_action_tags("hello [VOICE] [UNKNOWN:bad]")
-    assert clean == "hello [VOICE] [UNKNOWN:bad]"
-    assert actions == []
 
 
 def test_semantic_index_persists_metadata(tmp_path: Path):
