@@ -37,3 +37,21 @@ def test_extract_r2_keys_from_search_result():
         "photos/red-crop-top.jpg",
         "photos/other.jpg",
     ]
+
+def test_mcp_image_extraction_from_tool_message_artifact():
+    import base64
+    from types import SimpleNamespace
+
+    raw = b"artifact-image"
+    result = SimpleNamespace(
+        content="image fetched",
+        artifact=[
+            {
+                "type": "image",
+                "data": base64.b64encode(raw).decode(),
+                "mimeType": "image/jpeg",
+            }
+        ],
+    )
+    assert CloudflareMCPClient.extract_images(result) == [(raw, "image/jpeg")]
+
