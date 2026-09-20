@@ -79,6 +79,13 @@ async def send_mcp_images(
                 normalized.save(buffer, format="JPEG", quality=92, optimize=True)
                 payload = buffer.getvalue()
 
+            logger.info(
+                "MCP image delivered index=%s mime=%s source_bytes=%s telegram_bytes=%s",
+                index,
+                mime_type,
+                len(data),
+                len(payload),
+            )
             if len(payload) > 10 * 1024 * 1024:
                 await update.message.reply_document(
                     document=io.BytesIO(payload),
