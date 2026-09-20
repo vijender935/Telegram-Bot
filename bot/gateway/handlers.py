@@ -29,8 +29,20 @@ _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 def _strip_tool_image_markup(text: str) -> str:
-    """Remove image markdown emitted by MCP tools before it reaches the LLM."""
-    return re.sub(r"!\[[^\]]*\]\([^\n]*?\)", "", text).strip()
+    """Remove image markdown/base64 payloads emitted by MCP tools."""
+    # MCP image markdown can contain a very long base64 path and may be
+    # truncated before the closing ')'. Strip the whole image payload.
+    text = re.sub(
+        r"!\[[^\]]*\]\((?:/|data:image/)[\\s\\S]*",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\\s]+",
+        "",
+        text,
+    )
+    return text.strip()
 
 
 def _tool_result_text(result: object, image_count: int = 0) -> str:
