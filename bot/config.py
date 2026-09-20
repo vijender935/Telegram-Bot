@@ -16,14 +16,6 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
-# Gemini (chat / personality path)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
-GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.95"))
-GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "1024"))
-GEMINI_ENABLED = os.getenv("GEMINI_ENABLED", "true").lower() in ("1", "true", "yes")
-
-
 SANDBOX_PATH = os.getenv("SANDBOX_PATH", "/var/data/bot_files" if os.path.isdir("/var/data") else "/tmp/bot_files")
 MEMORY_DB_PATH = os.getenv("MEMORY_DB_PATH", "/var/data/bot_memory.db" if os.path.isdir("/var/data") else "/tmp/bot_memory.db")
 PORT = int(os.getenv("PORT", "8080"))
@@ -63,14 +55,10 @@ def validate_startup() -> None:
         missing.append("TELEGRAM_BOT_TOKEN")
     if not GROQ_API_KEY:
         missing.append("GROQ_API_KEY")
-    if GEMINI_ENABLED and not GEMINI_API_KEY:
-        missing.append("GEMINI_API_KEY")
     if missing:
         raise ConfigurationError("Missing required environment variables: " + ", ".join(missing))
     if not 0 <= GROQ_TEMPERATURE <= 2:
         raise ConfigurationError("GROQ_TEMPERATURE must be between 0 and 2")
-    if not 0 <= GEMINI_TEMPERATURE <= 2:
-        raise ConfigurationError("GEMINI_TEMPERATURE must be between 0 and 2")
     if GROQ_MAX_TOKENS < 256 or GROQ_MAX_TOKENS > 4096:
         raise ConfigurationError("GROQ_MAX_TOKENS must be between 256 and 4096")
     if LLM_HISTORY_MESSAGES < 0 or LLM_HISTORY_MESSAGES > MAX_HISTORY_MESSAGES:
