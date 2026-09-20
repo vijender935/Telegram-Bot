@@ -16,6 +16,13 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
+# Gemini (chat / personality path)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
+GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.95"))
+GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "1024"))
+GEMINI_ENABLED = os.getenv("GEMINI_ENABLED", "true").lower() in ("1", "true", "yes")
+
 HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "").strip()
 
@@ -26,7 +33,9 @@ PORT = int(os.getenv("PORT", "8080"))
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
 GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b").strip()
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "1200"))
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
+GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.7"))
+# legacy alias
+TEMPERATURE = float(os.getenv("TEMPERATURE", str(GROQ_TEMPERATURE)))
 
 SERIAL_MAP_TTL_SECONDS = int(os.getenv("SERIAL_MAP_TTL_SECONDS", str(30 * 60)))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
@@ -39,7 +48,6 @@ MEDIA_FOLLOWUP = os.getenv("MEDIA_FOLLOWUP", "true").lower() in ("1", "true", "y
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "20"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
-# User-owned custom Cloudflare MCP only.
 CLOUDFLARE_MCP_URL = os.getenv(
     "CLOUDFLARE_MCP_URL",
     "https://cloudflare-mcp.vijender935.workers.dev/mcp",
@@ -59,10 +67,14 @@ def validate_startup() -> None:
         missing.append("TELEGRAM_BOT_TOKEN")
     if not GROQ_API_KEY:
         missing.append("GROQ_API_KEY")
+    if GEMINI_ENABLED and not GEMINI_API_KEY:
+        missing.append("GEMINI_API_KEY")
     if missing:
         raise ConfigurationError("Missing required environment variables: " + ", ".join(missing))
-    if not 0 <= TEMPERATURE <= 2:
-        raise ConfigurationError("TEMPERATURE must be between 0 and 2")
+    if not 0 <= GROQ_TEMPERATURE <= 2:
+        raise ConfigurationError("GROQ_TEMPERATURE must be between 0 and 2")
+    if not 0 <= GEMINI_TEMPERATURE <= 2:
+        raise ConfigurationError("GEMINI_TEMPERATURE must be between 0 and 2")
     if GROQ_MAX_TOKENS < 256 or GROQ_MAX_TOKENS > 4096:
         raise ConfigurationError("GROQ_MAX_TOKENS must be between 256 and 4096")
     if LLM_HISTORY_MESSAGES < 0 or LLM_HISTORY_MESSAGES > MAX_HISTORY_MESSAGES:

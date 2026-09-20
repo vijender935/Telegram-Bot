@@ -1,4 +1,4 @@
-"""Conversation chain construction."""
+"""Conversation chain construction for Groq (tools) and Gemini (chat)."""
 from __future__ import annotations
 
 from langchain_groq import ChatGroq
@@ -6,22 +6,35 @@ from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from bot import config
-from bot.agent.prompts import SYSTEM_PROMPT
+from bot.agent.prompts import CHAT_SYSTEM_PROMPT, TOOL_SYSTEM_PROMPT
 from bot.domain.learning import profile_to_prompt_text
 
 
-def build_chat_agent_with_components(
-    llm: ChatGroq,
-    tools: list,
+def _format_chat_system(
+    user_profile: dict | None = None,
+    session_summary: str = "",
+    last_media: str = "",
+    time_context: str = "",
+    memory_context: str = "",
+) -> str:
+    return CHAT_SYSTEM_PROMPT.format(
+        user_profile=profile_to_prompt_text(user_profile),
+        session_summary=session_summary or "(no session summary yet)",
+        last_media=last_media or "(no recent media shared)",
+        time_context=time_context or "current time context unavailable",
+        memory_context=memory_context or "(no relevant long-term memories)",
+    )
+
+
+def _format_tool_system(
     user_profile: dict | None = None,
     session_summary: str = "",
     last_media: str = "",
     time_context: str = "",
     memory_context: str = "",
     response_policy: str = "mode=conversation; language=hinglish; length=adaptive; ask_followup=False; explain=False",
-):
-    """Build the conversational model with explicit policy and relevance-ranked context."""
-    system = SYSTEM_PROMPT.format(
+) -> str:
+    return TOOL_SYSTEM_PROMPT.format(
         user_profile=profile_to_prompt_text(user_profile),
         session_summary=session_summary or "(no session summary yet)",
         last_media=last_media or "(no recent media shared)",
@@ -30,9 +43,28 @@ def build_chat_agent_with_components(
         response_policy=response_policy,
     )
 
-    # System content contains user/profile/memory text. Passing it as a
-    # SystemMessage prevents literal braces in that data (for example JSON)
-    # from being interpreted as LangChain template variables.
+
+def build_chat_agent_with_components(
+    llm,
+    tools: list,
+    user_profile: dict | None = None,
+    session_summary: str = "",
+    last_media: str = "",
+    time_context: str = "",
+    memory_context: str = "",
+    response_policy: str = "mode=conversation; language=hinglish; length=adaptive; ask_followup=False; explain=False",
+    mode: str = "tools",
+):
+    """Build chain. mode='chat' uses Gemini identity prompt; mode='tools' uses Groq tool prompt."""
+    if mode == "chat":
+        system = _format_chat_system(
+            user_profile, session_summary, last_media, time_context, memory_context
+        )
+    else:
+        system = _format_tool_system(
+            user_profile, session_summary, last_media, time_context, memory_context, response_policy
+        )
+
     system_message = SystemMessage(content=system)
     prompt = ChatPromptTemplate.from_messages([
         system_message,
@@ -44,7 +76,7 @@ def build_chat_agent_with_components(
 
 
 def build_chat_agent(
-    llm: ChatGroq,
+    llm,
     tools: list,
     user_profile: dict | None = None,
     session_summary: str = "",
@@ -52,24 +84,36 @@ def build_chat_agent(
     time_context: str = "",
     memory_context: str = "",
     response_policy: str = "mode=conversation; language=hinglish; length=adaptive; ask_followup=False; explain=False",
+    mode: str = "tools",
 ):
-    """Build the conversational model with explicit policy and relevance-ranked context."""
     return build_chat_agent_with_components(
         llm, tools, user_profile, session_summary, last_media,
-        time_context, memory_context, response_policy,
+        time_context, memory_context, response_policy, mode,
     )[0]
 
 
-def build_llm(model_name: str | None = None) -> ChatGroq:
-    """Create the Groq client with an explicit completion budget.
-
-    Groq's on-demand tier enforces a tokens-per-minute request budget. Keeping
-    the completion cap bounded prevents a valid conversation context from
-    becoming a 413 when the default model output budget is too large.
-    """
+def build_groq_llm(model_name: str | None = None) -> ChatGroq:
+    """Groq client for tool-calling path."""
     return ChatGroq(
         model=model_name or config.GROQ_MODEL,
         groq_api_key=config.GROQ_API_KEY,
-        temperature=config.TEMPERATURE,
+        temperature=config.GROQ_TEMPERATURE,
         max_tokens=config.GROQ_MAX_TOKENS,
     )
+
+
+def build_gemini_llm():
+    """Gemini client for natural chat path. Requires langchain-google-genai."""
+    from langchain_google_genai import ChatGoogleGenerativeAI
+
+    return ChatGoogleGenerativeAI(
+        model=config.GEMINI_MODEL,
+        google_api_key=config.GEMINI_API_KEY,
+        temperature=config.GEMINI_TEMPERATURE,
+        max_output_tokens=config.GEMINI_MAX_TOKENS,
+    )
+
+
+# Backward-compatible alias used by main.py / media handlers
+def build_llm(model_name: str | None = None):
+    return build_groq_llm(model_name)
