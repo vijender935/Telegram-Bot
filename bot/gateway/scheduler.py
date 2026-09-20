@@ -1,7 +1,6 @@
 import logging
 import random
 from telegram.ext import ContextTypes
-from bot.gateway.base import _allowed
 from bot.domain.orchestrator import build_context_packet
 from bot.domain.learning import profile_to_prompt_text
 from bot.agent.prompts import SYSTEM_PROMPT
@@ -20,9 +19,6 @@ async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
         return
 
     for uid in uids:
-        if not _allowed(uid):
-            continue
-        
         # 1 in 5 chance to actually ping
         if random.random() > 0.2:
             continue
