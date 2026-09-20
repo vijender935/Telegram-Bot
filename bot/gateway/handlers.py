@@ -70,6 +70,35 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
     return text[:4000]
 
 
+def _llm_tool_result(
+    result: object,
+    tool_name: str,
+    image_count: int = 0,
+    r2_key_count: int = 0,
+) -> str:
+    """Build an LLM-safe summary; never expose MCP media payloads to the model."""
+    if tool_name == "search_images":
+        summary = f"search_images completed; {r2_key_count} matching image object(s) found."
+        if image_count:
+            summary += f" {image_count} image(s) were delivered to the user."
+        elif r2_key_count:
+            summary += " The matching image could not be delivered."
+        return summary
+
+    if tool_name == "get_image":
+        if image_count:
+            return f"get_image completed; {image_count} image(s) were delivered to the user."
+        return "get_image completed, but no image was available for delivery."
+
+    if image_count:
+        return (
+            f"{tool_name} completed; {image_count} image(s) were delivered to the user. "
+            "Image binary/base64 content is intentionally not included in the tool result."
+        )
+
+    return _tool_result_text(result)
+
+
 def _extract_tool_calls(response: object) -> list[dict]:
     calls = getattr(response, "tool_calls", None) or []
     if calls:
@@ -262,21 +291,23 @@ async def _execute_tool_calls(
                     executed_tool_results[call_signature] = result
 
                 image_count = 0
+                r2_keys: list[str] = []
+                tool_name = call.get("name") or ""
                 if cloudflare_mcp:
                     images = cloudflare_mcp.extract_images(result)
                     if images:
                         image_count = await send_mcp_images(update, images)
 
-                    if call.get("name") == "search_images":
-                        keys = extract_r2_keys(result)
-                        if keys:
+                    if tool_name == "search_images":
+                        r2_keys = extract_r2_keys(result)
+                        if r2_keys:
                             try:
                                 image_result = await cloudflare_mcp.invoke_raw(
-                                    "get_image", {"key": keys[0]}
+                                    "get_image", {"key": r2_keys[0]}
                                 )
                                 fetched = cloudflare_mcp.extract_images(image_result)
                                 if fetched:
-                                    key = keys[0]
+                                    key = r2_keys[0]
                                     if key not in delivered_r2_keys:
                                         caption = None
                                         try:
@@ -286,24 +317,24 @@ async def _execute_tool_calls(
                                             )
                                             caption = (caption or "").strip()[:1024] or None
                                         except Exception:
-                                            logger.exception(
-                                                "image caption failed key=%s", key
-                                            )
+                                            logger.exception("image caption failed key=%s", key)
                                         delivered = await send_mcp_images(
                                             update, fetched, caption=caption
                                         )
                                         if delivered:
                                             delivered_r2_keys.add(key)
                                         image_count += delivered
-                                    result = image_result
                             except Exception:
-                                logger.exception(
-                                    "automatic get_image failed key=%s", keys[0]
-                                )
+                                logger.exception("automatic get_image failed key=%s", r2_keys[0])
 
                 tool_messages.append(
                     ToolMessage(
-                        content=_tool_result_text(result, image_count),
+                        content=_llm_tool_result(
+                            result,
+                            tool_name,
+                            image_count=image_count,
+                            r2_key_count=len(r2_keys),
+                        ),
                         tool_call_id=call.get("id", "unknown"),
                     )
                 )
