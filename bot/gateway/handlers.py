@@ -209,89 +209,176 @@ async def _run_tools_path(
     )
 
     try:
-        response = await chain.ainvoke({"input": user_text, "chat_history": llm_history})
-        executed_tool_results: dict[tuple[str, str], object] = {}
-        delivered_r2_keys: set[str] = set()
+async def _execute_tool_calls(
+    update,
+    uid: int,
+    response,
+    tools,
+    tool_model,
+    system_message,
+    llm_history,
+    user_text: str,
+    cloudflare_mcp,
+) -> object:
+    executed_tool_results: dict[tuple[str, str], object] = {}
+    delivered_r2_keys: set[str] = set()
 
-        for _ in range(6):
-            tool_calls = _extract_tool_calls(response)
-            if not tool_calls:
-                break
-            tool_map = {tool.name: tool for tool in tools}
-            tool_messages = []
-            for call in tool_calls:
-                tool = tool_map.get(call.get("name"))
-                if not tool:
-                    logger.error("unknown tool requested name=%s user=%s", call.get("name"), uid)
-                    tool_messages.append(ToolMessage(content="Unknown tool", tool_call_id=call.get("id", "unknown")))
-                    continue
-                try:
-                    call_args = call.get("args", {})
-                    try:
-                        call_signature = (
-                            call.get("name", ""),
-                            json.dumps(call_args, sort_keys=True, separators=(",", ":"), default=str),
-                        )
-                    except (TypeError, ValueError):
-                        call_signature = (call.get("name", ""), repr(call_args))
+    for _ in range(6):
+        tool_calls = _extract_tool_calls(response)
+        if not tool_calls:
+            break
 
-                    cached_result = executed_tool_results.get(call_signature)
-                    if cached_result is not None:
-                        result = cached_result
-                    else:
-                        result = await tool.ainvoke(call_args)
-                        executed_tool_results[call_signature] = result
-
-                    image_count = 0
-                    if cloudflare_mcp:
-                        images = cloudflare_mcp.extract_images(result)
-                        if images:
-                            image_count = await send_mcp_images(update, images)
-
-                        if call.get("name") == "search_images":
-                            keys = extract_r2_keys(result)
-                            if keys:
-                                try:
-                                    image_result = await cloudflare_mcp.invoke_raw("get_image", {"key": keys[0]})
-                                    fetched = cloudflare_mcp.extract_images(image_result)
-                                    if fetched:
-                                        key = keys[0]
-                                        if key not in delivered_r2_keys:
-                                            caption = None
-                                            try:
-                                                caption = await describe_image_bytes(
-                                                    fetched[0][0], "cloudflare_image_1.jpg",
-                                                )
-                                                caption = (caption or "").strip()[:1024] or None
-                                            except Exception:
-                                                logger.exception("image caption failed key=%s", key)
-                                            delivered = await _send_mcp_images(update, fetched, caption=caption)
-                                            if delivered:
-                                                delivered_r2_keys.add(key)
-                                            image_count += delivered
-                                        result = image_result
-                                except Exception:
-                                    logger.exception("automatic get_image failed key=%s", keys[0])
-
-                    tool_messages.append(
-                        ToolMessage(
-                            content=_tool_result_text(result, image_count),
-                            tool_call_id=call.get("id", "unknown"),
-                        )
-                    )
-                except Exception as exc:
-                    logger.exception("tool execution failed name=%s user=%s", call.get("name"), uid)
-                    tool_messages.append(ToolMessage(
-                        content=f"Tool execution failed ({type(exc).__name__}). Do not pretend it succeeded.",
+        tool_map = {tool.name: tool for tool in tools}
+        tool_messages = []
+        for call in tool_calls:
+            tool = tool_map.get(call.get("name"))
+            if not tool:
+                logger.error("unknown tool requested name=%s user=%s", call.get("name"), uid)
+                tool_messages.append(
+                    ToolMessage(
+                        content="Unknown tool",
                         tool_call_id=call.get("id", "unknown"),
-                    ))
-            response = await tool_model.ainvoke([
+                    )
+                )
+                continue
+
+            try:
+                call_args = call.get("args", {})
+                try:
+                    call_signature = (
+                        call.get("name", ""),
+                        json.dumps(
+                            call_args,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            default=str,
+                        ),
+                    )
+                except (TypeError, ValueError):
+                    call_signature = (call.get("name", ""), repr(call_args))
+
+                cached_result = executed_tool_results.get(call_signature)
+                if cached_result is not None:
+                    result = cached_result
+                else:
+                    result = await tool.ainvoke(call_args)
+                    executed_tool_results[call_signature] = result
+
+                image_count = 0
+                if cloudflare_mcp:
+                    images = cloudflare_mcp.extract_images(result)
+                    if images:
+                        image_count = await send_mcp_images(update, images)
+
+                    if call.get("name") == "search_images":
+                        keys = extract_r2_keys(result)
+                        if keys:
+                            try:
+                                image_result = await cloudflare_mcp.invoke_raw(
+                                    "get_image", {"key": keys[0]}
+                                )
+                                fetched = cloudflare_mcp.extract_images(image_result)
+                                if fetched:
+                                    key = keys[0]
+                                    if key not in delivered_r2_keys:
+                                        caption = None
+                                        try:
+                                            caption = await describe_image_bytes(
+                                                fetched[0][0],
+                                                "cloudflare_image_1.jpg",
+                                            )
+                                            caption = (caption or "").strip()[:1024] or None
+                                        except Exception:
+                                            logger.exception(
+                                                "image caption failed key=%s", key
+                                            )
+                                        delivered = await send_mcp_images(
+                                            update, fetched, caption=caption
+                                        )
+                                        if delivered:
+                                            delivered_r2_keys.add(key)
+                                        image_count += delivered
+                                    result = image_result
+                            except Exception:
+                                logger.exception(
+                                    "automatic get_image failed key=%s", keys[0]
+                                )
+
+                tool_messages.append(
+                    ToolMessage(
+                        content=_tool_result_text(result, image_count),
+                        tool_call_id=call.get("id", "unknown"),
+                    )
+                )
+            except Exception as exc:
+                logger.exception(
+                    "tool execution failed name=%s user=%s",
+                    call.get("name"),
+                    uid,
+                )
+                tool_messages.append(
+                    ToolMessage(
+                        content=(
+                            f"Tool execution failed ({type(exc).__name__}). "
+                            "Do not pretend it succeeded."
+                        ),
+                        tool_call_id=call.get("id", "unknown"),
+                    )
+                )
+
+        response = await tool_model.ainvoke(
+            [
                 system_message,
                 *llm_history,
                 HumanMessage(content=user_text),
                 response,
                 *tool_messages,
-            ])
+            ]
+        )
+
+    return response
+
+
+async def _run_tools_path(
+    update, context, uid, user_text, ctx, llm_history, memory,
+    cloudflare_mcp, mcp_tools, force_chat_mode: bool = False,
+) -> str | None:
+    """Groq path — tools + technical prompt."""
+    llm = context.application.bot_data.get("llm") or build_groq_llm()
+    response_policy = infer_response_policy(user_text, ctx["profile"])
+    tools = build_tools(
+        memory=memory,
+        user_id=uid,
+        sandbox_path=config.SANDBOX_PATH,
+        mcp_tools=mcp_tools if not force_chat_mode else [],
+    )
+    mode = "chat" if force_chat_mode else "tools"
+    chain, system_message, tool_model = build_chat_agent_with_components(
+        llm, tools,
+        user_profile=ctx["profile"],
+        session_summary=ctx["session_summary_text"],
+        last_media=ctx["last_media_text"],
+        time_context=ctx["time_context"],
+        memory_context=ctx.get("memory_context_text", ""),
+        response_policy=response_policy.to_prompt(),
+        mode=mode,
+    )
+
+    try:
+        response = await chain.ainvoke(
+            {"input": user_text, "chat_history": llm_history}
+        )
+        response = await _execute_tool_calls(
+            update,
+            uid,
+            response,
+            tools,
+            tool_model,
+            system_message,
+            llm_history,
+            user_text,
+            cloudflare_mcp,
+        )
 
         full_reply = getattr(response, "content", None)
         clean_reply = str(full_reply).strip() if full_reply else ""
@@ -305,9 +392,13 @@ async def _run_tools_path(
 
     except BotError:
         logger.exception("groq path failed user=%s", uid)
-        await update.message.reply_text("Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo.")
+        await update.message.reply_text(
+            "Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo."
+        )
         return None
     except Exception:
         logger.exception("groq path failed user=%s", uid)
-        await update.message.reply_text("AI response generate nahi ho paaya. Thodi der mein dobara try karo.")
+        await update.message.reply_text(
+            "AI response generate nahi ho paaya. Thodi der mein dobara try karo."
+        )
         return None
