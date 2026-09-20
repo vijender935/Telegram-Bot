@@ -12,7 +12,6 @@ class MemoryStore:
 
     def __init__(self, db_path: str = "memory.db"):
         self._lock = threading.Lock()
-        self._mode = "sqlite"
         self._db_path = db_path
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
         self._init_db()
@@ -23,9 +22,6 @@ class MemoryStore:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=30000")
         return conn
-
-    def _put(self, conn):
-        conn.close()
 
     def _init_db(self):
         conn = self._conn()
@@ -67,7 +63,7 @@ class MemoryStore:
                 """)
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_media_user ON media_memory(user_id, created_at DESC)")
         finally:
-            self._put(conn)
+            conn.close()
 
     def _execute(self, query: str, params: tuple = (), fetch: str = "none"):
         query = query.replace("%s", "?")
