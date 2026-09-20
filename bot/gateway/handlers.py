@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from collections import defaultdict
 
 from telegram import Update
@@ -27,6 +28,11 @@ logger = logging.getLogger(__name__)
 _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
+def _strip_tool_image_markup(text: str) -> str:
+    """Remove image markdown emitted by MCP tools before it reaches the LLM."""
+    return re.sub(r"!\[[^\]]*\]\([^\n]*?\)", "", text).strip()
+
+
 def _tool_result_text(result: object, image_count: int = 0) -> str:
     if isinstance(result, (list, tuple)):
         parts = []
@@ -46,6 +52,7 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
     else:
         text = str(result)
 
+    text = _strip_tool_image_markup(text)
     if image_count:
         text = (text + "\n" if text else "") + f"{image_count} image(s) retrieved and sent to the user."
     return text[:4000]
