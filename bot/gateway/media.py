@@ -6,7 +6,6 @@ from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage
 
 from bot import config
-from bot.gateway.base import _allowed
 from bot.gateway.formatters import send_long_text, send_local_file
 from bot.infra.transcribe import transcribe_audio
 from bot.infra.media_describe import describe_media_path, is_image, is_video
@@ -18,8 +17,6 @@ from bot.agent.tools import build_tools
 logger = logging.getLogger(__name__)
 
 async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
     uid = update.effective_user.id
     memory = context.application.bot_data["memory"]
     history = memory.get_history(uid)
@@ -49,8 +46,6 @@ async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Media Handlers ---
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
     sandbox = context.application.bot_data["sandbox"]
     memory = context.application.bot_data["memory"]
     uid = update.effective_user.id
@@ -76,8 +71,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Photo fail.")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
     memory = context.application.bot_data["memory"]
     groq_key = context.application.bot_data.get("groq_api_key")
     sandbox = context.application.bot_data["sandbox"]
@@ -115,8 +108,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Document fail.")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
     voice = update.message.voice
     try:
         tg_file = await context.bot.get_file(voice.file_id)
@@ -128,8 +119,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Voice fail.")
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
     audio = update.message.audio
     name = audio.file_name or f"audio_{audio.file_unique_id}.mp3"
     try:
@@ -142,8 +131,6 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Audio fail.")
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
     video = update.message.video
     name = video.file_name or f"video_{video.file_unique_id}.mp4"
     try:
@@ -164,8 +151,6 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Video fail.")
 
 async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _allowed(update.effective_user.id):
-        return
     note = update.message.video_note
     try:
         tg_file = await context.bot.get_file(note.file_id)
