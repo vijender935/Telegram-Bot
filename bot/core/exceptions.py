@@ -32,10 +32,6 @@ class TelegramServiceError(BotError):
     pass
 
 
-class DriveError(BotError):
-    pass
-
-
 class MediaError(BotError):
     pass
 
