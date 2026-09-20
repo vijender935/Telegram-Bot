@@ -20,7 +20,7 @@ from bot.agent.router import route_task
 from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
-from bot.infra.vision import describe_image_bytes
+from bot.infrastructure.vision import describe_image_bytes
 from bot.gateway.mcp_media import extract_r2_keys, send_mcp_images
 
 logger = logging.getLogger(__name__)
