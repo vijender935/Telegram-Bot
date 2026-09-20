@@ -10,7 +10,7 @@ from bot.agent.prompts import SYSTEM_PROMPT
 from bot.domain.learning import profile_to_prompt_text
 
 
-def build_chat_agent(
+def build_chat_agent_with_components(
     llm: ChatGroq,
     tools: list,
     current_mood: str,
@@ -45,13 +45,34 @@ def build_chat_agent(
     # System content contains user/profile/memory text. Passing it as a
     # SystemMessage prevents literal braces in that data (for example JSON)
     # from being interpreted as LangChain template variables.
+    system_message = SystemMessage(content=system)
     prompt = ChatPromptTemplate.from_messages([
-        SystemMessage(content=system),
+        system_message,
         MessagesPlaceholder("chat_history"),
         ("human", "{input}"),
     ])
     model = llm.bind_tools(tools) if tools else llm
-    return prompt | model
+    return prompt | model, system_message, model
+
+
+def build_chat_agent(
+    llm: ChatGroq,
+    tools: list,
+    current_mood: str,
+    user_profile: dict | None = None,
+    session_summary: str = "",
+    last_media: str = "",
+    active_fantasy: str = "",
+    emotion: str = "neutral",
+    time_context: str = "",
+    memory_context: str = "",
+    response_policy: str = "mode=conversation; language=hinglish; length=adaptive; ask_followup=False; explain=False",
+):
+    """Build the conversational model with explicit policy and relevance-ranked context."""
+    return build_chat_agent_with_components(
+        llm, tools, current_mood, user_profile, session_summary, last_media,
+        active_fantasy, emotion, time_context, memory_context, response_policy,
+    )[0]
 
 
 def build_llm(model_name: str | None = None) -> ChatGroq:
