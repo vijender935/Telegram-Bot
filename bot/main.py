@@ -162,7 +162,7 @@ async def run_bot() -> None:
     await app.start()
     _TELEGRAM_APP = app
     threading.Thread(target=run_web, daemon=True).start()
-    start_scheduler(app, memory)
+    start_scheduler(app)
 
     async def initialize_mcp_background() -> None:
         try:
