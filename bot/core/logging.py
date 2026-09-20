@@ -1,10 +1,7 @@
-"""Structured logging helpers with secret redaction."""
+"""Structured logging helpers."""
 from __future__ import annotations
 
 import logging
-import re
-
-_SECRET_RE = re.compile(r"(?i)(token|api[_-]?key|password|secret|authorization)\s*[=:]\s*([^\s,]+)")
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -15,7 +12,3 @@ def configure_logging(level: str = "INFO") -> None:
     )
     for name in ("httpx", "telegram", "googleapiclient"):
         logging.getLogger(name).setLevel(logging.WARNING)
-
-
-def redact(value: object) -> str:
-    return _SECRET_RE.sub(r"\1=[REDACTED]", str(value))
