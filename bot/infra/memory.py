@@ -66,13 +66,6 @@ class MemoryStore:
                     )
                 """)
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_media_user ON media_memory(user_id, created_at DESC)")
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS serial_maps (
-                        user_id INTEGER PRIMARY KEY,
-                        entries TEXT NOT NULL DEFAULT '{}',
-                        created_at REAL
-                    )
-                """)
         finally:
             self._put(conn)
 
@@ -138,7 +131,7 @@ class MemoryStore:
         self._execute("DELETE FROM profiles WHERE user_id = %s", (user_id,))
 
     def clear_all_for_user(self, user_id: int):
-        tables = ["memories", "profiles", "session_summaries", "media_memory", "serial_maps"]
+        tables = ["memories", "profiles", "session_summaries", "media_memory"]
         for table in tables:
             self._execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
 
@@ -178,19 +171,6 @@ class MemoryStore:
         if not last:
             return
         self._execute("UPDATE media_memory SET reaction = %s WHERE user_id = %s AND file_key = %s AND created_at = %s", (reaction[:200], user_id, last["file_key"], last["created_at"]))
-
-    def get_serial_map(self, user_id: int) -> dict:
-        row = self._execute("SELECT entries FROM serial_maps WHERE user_id = %s", (user_id,), fetch="one")
-        if not row:
-            return {}
-        return json.loads(row[0])
-
-    def set_serial_map(self, user_id: int, entries: dict):
-        self._execute(
-            "INSERT INTO serial_maps (user_id, entries, created_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(user_id) DO UPDATE SET entries = excluded.entries, created_at = excluded.created_at",
-            (user_id, json.dumps(entries), time.time()),
-        )
 
     def get_all_user_ids(self) -> list[int]:
         rows = self._execute("SELECT DISTINCT user_id FROM memories", fetch="all")
