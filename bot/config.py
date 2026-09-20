@@ -23,7 +23,7 @@ PORT = int(os.getenv("PORT", "8080"))
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
 GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b").strip()
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "1200"))
-GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "1.0"))
+GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.95"))
 
 SERIAL_MAP_TTL_SECONDS = int(os.getenv("SERIAL_MAP_TTL_SECONDS", str(30 * 60)))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
