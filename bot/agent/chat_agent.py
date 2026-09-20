@@ -112,8 +112,3 @@ def build_gemini_llm():
         temperature=config.GEMINI_TEMPERATURE,
         max_output_tokens=config.GEMINI_MAX_TOKENS,
     )
-
-
-# Backward-compatible alias used by main.py / media handlers
-def build_llm(model_name: str | None = None):
-    return build_groq_llm(model_name)
