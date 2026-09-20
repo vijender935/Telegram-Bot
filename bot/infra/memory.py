@@ -76,7 +76,7 @@ class MemoryStore:
                 if fetch == "all":
                     return cur.fetchall()
         finally:
-            self._put(conn)
+            conn.close()
 
     def get_history(self, user_id: int) -> list:
         row = self._execute("SELECT history FROM memories WHERE user_id = %s", (user_id,), fetch="one")
