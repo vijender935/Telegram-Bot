@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage
 
 from bot import config
-from bot.gateway.formatters import send_long_text, send_local_file
+from bot.gateway.formatters import send_long_text
 from bot.infra.transcribe import transcribe_audio
 from bot.infra.media_describe import describe_media_path, is_image, is_video
 from bot.infra.tts import generate_voice_note
@@ -200,11 +200,6 @@ async def _describe_and_remember(context, uid: int, local_name: str, file_id: st
         logger.exception("media describe failed")
         return ""
 
-
-async def _send_media_with_followup(update: Update, context: ContextTypes.DEFAULT_TYPE, filename: str, uid: int):
-    sandbox = context.application.bot_data["sandbox"]
-    path = sandbox.path_for(filename)
-    await send_local_file(update, path)
 
 
 async def _transcribe_and_reply(update, context, file_bytes, filename, label):
