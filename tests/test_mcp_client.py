@@ -55,3 +55,14 @@ def test_mcp_image_extraction_from_tool_message_artifact():
     )
     assert CloudflareMCPClient.extract_images(result) == [(raw, "image/jpeg")]
 
+def test_mcp_standard_image_block_extraction():
+    import base64
+    raw = b"standard-image"
+    block = {
+        "type": "image_url",
+        "image_url": {
+            "url": "data:image/png;base64," + base64.b64encode(raw).decode(),
+        },
+    }
+    assert CloudflareMCPClient.extract_images(block) == [(raw, "image/png")]
+
