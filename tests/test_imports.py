@@ -6,4 +6,4 @@ def test_core_imports():
     import bot.gateway.media
     import bot.gateway.scheduler
     import bot.infrastructure.rag_mcp
-    import bot.infrastructure.vectorstore.semantic_index
+    __import__('bot.infrastructure.vectorstore.semantic_index')
