@@ -27,10 +27,9 @@ from bot.gateway.media import (
 from bot.infra.memory import MemoryStore
 from bot.infra.sandbox import SandboxStorage
 from bot.infra.serial_map import SerialMapStore
-from bot.infra.rag_mcp import CloudflareMCPClient
-from bot.domain.memory_service import MemoryService
-from bot.domain.semantic_index import SemanticIndex
-from bot.domain.secure_memory import SecureMemory
+from bot.infrastructure.rag_mcp import CloudflareMCPClient
+from bot.domain.memory.service import MemoryService
+from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
 from bot.core.rate_limit import SlidingWindowRateLimiter
 from bot.scheduler import start_scheduler
 
@@ -102,7 +101,7 @@ async def run_bot() -> None:
     sandbox = SandboxStorage(config.SANDBOX_PATH)
     store = MemoryStore(config.MEMORY_DB_PATH)
     semantic_index = SemanticIndex(config.MEMORY_DB_PATH)
-    memory = SecureMemory(MemoryService(store, semantic_index))
+    memory = MemoryService(store, semantic_index)
     serial_store = SerialMapStore(ttl_seconds=config.SERIAL_MAP_TTL_SECONDS, db_path=config.MEMORY_DB_PATH)
 
     cloudflare_mcp = CloudflareMCPClient(
