@@ -5,5 +5,5 @@ def test_core_imports():
     import bot.gateway.handlers
     import bot.gateway.media
     import bot.gateway.scheduler
-    import bot.infrastructure.rag_mcp
+    __import__('bot.infrastructure.rag_mcp')
     __import__('bot.infrastructure.vectorstore.semantic_index')
