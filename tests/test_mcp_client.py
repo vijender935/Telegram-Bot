@@ -66,3 +66,19 @@ def test_mcp_standard_image_block_extraction():
     }
     assert CloudflareMCPClient.extract_images(block) == [(raw, "image/png")]
 
+def test_mcp_image_extraction_from_stringified_json():
+    import base64
+    import json
+
+    raw = b"stringified-image"
+    result = json.dumps({
+        "content": [
+            {
+                "type": "image",
+                "data": base64.b64encode(raw).decode(),
+                "mimeType": "image/jpeg",
+            },
+            {"type": "text", "text": "{\"key\": \"photos/red-crop-top.jpg\"}"},
+        ]
+    })
+    assert CloudflareMCPClient.extract_images(result) == [(raw, "image/jpeg")]
