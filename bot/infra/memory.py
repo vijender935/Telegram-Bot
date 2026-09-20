@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import sqlite3
@@ -39,12 +38,6 @@ class MemoryStore:
                     )
                 """)
                 conn.execute("""
-                    CREATE TABLE IF NOT EXISTS moods (
-                        user_id INTEGER PRIMARY KEY,
-                        mood TEXT NOT NULL DEFAULT 'neutral'
-                    )
-                """)
-                conn.execute("""
                     CREATE TABLE IF NOT EXISTS profiles (
                         user_id INTEGER PRIMARY KEY,
                         profile TEXT NOT NULL DEFAULT '{}'
@@ -55,13 +48,6 @@ class MemoryStore:
                         user_id INTEGER PRIMARY KEY,
                         summary TEXT NOT NULL DEFAULT '',
                         msg_count INTEGER NOT NULL DEFAULT 0,
-                        updated_at REAL
-                    )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS emotion_state (
-                        user_id INTEGER PRIMARY KEY,
-                        label TEXT NOT NULL DEFAULT 'neutral',
                         updated_at REAL
                     )
                 """)
@@ -81,38 +67,12 @@ class MemoryStore:
                 """)
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_media_user ON media_memory(user_id, created_at DESC)")
                 conn.execute("""
-                    CREATE TABLE IF NOT EXISTS active_fantasy (
-                        user_id INTEGER PRIMARY KEY,
-                        text TEXT NOT NULL DEFAULT '',
-                        updated_at REAL
-                    )
-                """)
-                conn.execute("""
                     CREATE TABLE IF NOT EXISTS serial_maps (
                         user_id INTEGER PRIMARY KEY,
                         entries TEXT NOT NULL DEFAULT '{}',
                         created_at REAL
                     )
                 """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS vault_codes (
-                        user_id INTEGER PRIMARY KEY,
-                        code TEXT NOT NULL,
-                        updated_at REAL
-                    )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS vault_entries (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        user_id INTEGER NOT NULL,
-                        file_id TEXT NOT NULL,
-                        file_name TEXT,
-                        label TEXT,
-                        description TEXT,
-                        created_at REAL
-                    )
-                """)
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_vault_user ON vault_entries(user_id, created_at DESC)")
         finally:
             self._put(conn)
 
@@ -158,17 +118,6 @@ class MemoryStore:
     def clear_history(self, user_id: int):
         self._execute("DELETE FROM memories WHERE user_id = %s", (user_id,))
 
-    def get_mood(self, user_id: int) -> str:
-        row = self._execute("SELECT mood FROM moods WHERE user_id = %s", (user_id,), fetch="one")
-        return row[0] if row else "neutral"
-
-    def set_mood(self, user_id: int, mood: str):
-        self._execute(
-            "INSERT INTO moods (user_id, mood) VALUES (?, ?) "
-            "ON CONFLICT(user_id) DO UPDATE SET mood = excluded.mood",
-            (user_id, mood),
-        )
-
     def get_profile(self, user_id: int) -> dict:
         row = self._execute("SELECT profile FROM profiles WHERE user_id = %s", (user_id,), fetch="one")
         if not row or not row[0]:
@@ -189,7 +138,7 @@ class MemoryStore:
         self._execute("DELETE FROM profiles WHERE user_id = %s", (user_id,))
 
     def clear_all_for_user(self, user_id: int):
-        tables = ["memories", "profiles", "moods", "emotion_state", "session_summaries", "active_fantasy", "media_memory", "serial_maps", "vault_codes", "vault_entries"]
+        tables = ["memories", "profiles", "session_summaries", "media_memory", "serial_maps"]
         for table in tables:
             self._execute(f"DELETE FROM {table} WHERE user_id = %s", (user_id,))
 
@@ -212,17 +161,6 @@ class MemoryStore:
         self.set_session(user_id, summary, count)
         return count
 
-    def get_emotion(self, user_id: int) -> str:
-        row = self._execute("SELECT label FROM emotion_state WHERE user_id = %s", (user_id,), fetch="one")
-        return row[0] if row else "neutral"
-
-    def set_emotion(self, user_id: int, label: str):
-        self._execute(
-            "INSERT INTO emotion_state (user_id, label, updated_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(user_id) DO UPDATE SET label = excluded.label, updated_at = excluded.updated_at",
-            (user_id, label or "neutral", time.time()),
-        )
-
     def add_media(self, user_id: int, file_key: str, name: str, type_: str, description: str, tags: list | None = None, file_id: str | None = None) -> None:
         self._execute(
             "INSERT INTO media_memory (user_id, file_key, file_id, name, type, description, tags, reaction, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, '', ?)",
@@ -241,17 +179,6 @@ class MemoryStore:
             return
         self._execute("UPDATE media_memory SET reaction = %s WHERE user_id = %s AND file_key = %s AND created_at = %s", (reaction[:200], user_id, last["file_key"], last["created_at"]))
 
-    def get_fantasy(self, user_id: int) -> str:
-        row = self._execute("SELECT text FROM active_fantasy WHERE user_id = %s", (user_id,), fetch="one")
-        return row[0] if row else ""
-
-    def set_fantasy(self, user_id: int, text: str):
-        self._execute(
-            "INSERT INTO active_fantasy (user_id, text, updated_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(user_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
-            (user_id, text or "", time.time()),
-        )
-
     def get_serial_map(self, user_id: int) -> dict:
         row = self._execute("SELECT entries FROM serial_maps WHERE user_id = %s", (user_id,), fetch="one")
         if not row:
@@ -264,34 +191,6 @@ class MemoryStore:
             "ON CONFLICT(user_id) DO UPDATE SET entries = excluded.entries, created_at = excluded.created_at",
             (user_id, json.dumps(entries), time.time()),
         )
-
-    def _hash_code(self, code: str) -> str:
-        return hashlib.sha256(code.encode()).hexdigest()
-
-    def get_vault_code(self, user_id: int) -> str | None:
-        row = self._execute("SELECT code FROM vault_codes WHERE user_id = %s", (user_id,), fetch="one")
-        return row[0] if row else None
-
-    def verify_vault_code(self, user_id: int, code: str) -> bool:
-        saved = self.get_vault_code(user_id)
-        return bool(saved and saved == self._hash_code(code))
-
-    def set_vault_code(self, user_id: int, code: str):
-        self._execute(
-            "INSERT INTO vault_codes (user_id, code, updated_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(user_id) DO UPDATE SET code = excluded.code, updated_at = excluded.updated_at",
-            (user_id, self._hash_code(code), time.time()),
-        )
-
-    def add_vault_entry(self, user_id: int, file_id: str, file_name: str, label: str, description: str = ""):
-        self._execute("INSERT INTO vault_entries (user_id, file_id, file_name, label, description, created_at) VALUES (?, ?, ?, ?, ?, ?)", (user_id, file_id, file_name, label, description, time.time()))
-
-    def get_vault_entries(self, user_id: int) -> list:
-        rows = self._execute("SELECT id, file_id, file_name, label, description, created_at FROM vault_entries WHERE user_id = %s ORDER BY created_at DESC", (user_id,), fetch="all") or []
-        return [{"id": r[0], "file_id": r[1], "file_name": r[2], "label": r[3], "description": r[4], "created_at": r[5]} for r in rows]
-
-    def delete_vault_entry(self, user_id: int, entry_id: int):
-        self._execute("DELETE FROM vault_entries WHERE user_id = %s AND id = %s", (user_id, entry_id))
 
     def get_all_user_ids(self) -> list[int]:
         rows = self._execute("SELECT DISTINCT user_id FROM memories", fetch="all")

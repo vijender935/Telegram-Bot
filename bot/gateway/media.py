@@ -27,9 +27,9 @@ async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text = msg.content
                 break
     if not text:
-        await update.message.reply_text("Pehle kuch baat toh karo, tabhi toh bolungi 😏")
+        await update.message.reply_text("Pehle kuch baat toh karo, tabhi voice note bhejunga.")
         return
-    await update.message.reply_text("Ek sec, voice note bhej rahi hoon...")
+    await update.message.reply_text("Ek sec, voice note bhej raha hoon...")
     sandbox = context.application.bot_data["sandbox"]
     filename = f"voice_{uid}.mp3"
     path = sandbox.path_for(filename)
@@ -41,9 +41,8 @@ async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if os.path.exists(path):
                 os.remove(path)
     else:
-        await update.message.reply_text("Abhi gala kharab hai, baad mein try karna.")
+        await update.message.reply_text("Abhi voice generate nahi ho paaya, baad mein try karna.")
 
-# --- Media Handlers ---
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sandbox = context.application.bot_data["sandbox"]
@@ -59,9 +58,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         h.append(HumanMessage(content="[photo]"))
         memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
         desc = await _describe_and_remember(context, uid, name, file_id=photo.file_id)
-        if desc:
-            mood = memory.get_mood(uid)
-            follow = media_followup_lines(desc, mood)
+        if desc and config.MEDIA_FOLLOWUP:
+            follow = media_followup_lines(desc)
             await update.message.reply_text(follow)
             h.append(AIMessage(content=follow))
             memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
@@ -69,6 +67,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("photo failed")
         await update.message.reply_text("Photo fail.")
+
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     memory = context.application.bot_data["memory"]
@@ -88,7 +87,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_audio and groq_key:
             await _transcribe_and_reply(update, context, data, name, f"audio: {name}")
         elif is_video and groq_key:
-            status = await update.message.reply_text("🎬 Video se audio nikaal rahi hoon…")
+            status = await update.message.reply_text("🎬 Video se audio nikaal raha hoon…")
             try:
                 from bot.infra.transcribe import extract_audio_from_video
                 audio = extract_audio_from_video(data)
@@ -107,6 +106,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("document failed")
         await update.message.reply_text("Document fail.")
 
+
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     voice = update.message.voice
     try:
@@ -117,6 +117,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("voice failed")
         await update.message.reply_text("Voice fail.")
+
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio = update.message.audio
@@ -130,6 +131,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("audio failed")
         await update.message.reply_text("Audio fail.")
 
+
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     video = update.message.video
     name = video.file_name or f"video_{video.file_unique_id}.mp4"
@@ -137,7 +139,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tg_file = await context.bot.get_file(video.file_id)
         buf = io.BytesIO()
         await tg_file.download_to_memory(buf)
-        status = await update.message.reply_text("🎬 Video se audio nikaal rahi hoon…")
+        status = await update.message.reply_text("🎬 Video se audio nikaal raha hoon…")
         try:
             from bot.infra.transcribe import extract_audio_from_video
             audio = extract_audio_from_video(buf.getvalue())
@@ -149,6 +151,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("video download failed")
         await update.message.reply_text("Video fail.")
+
 
 async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     note = update.message.video_note
@@ -169,7 +172,6 @@ async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("video_note download failed")
         await update.message.reply_text("Video note fail.")
 
-# --- Internal Helpers ---
 
 async def _ask_enhance_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, local_name: str):
     """Keep enhancement prompt-driven; never render an action keyboard."""
@@ -198,16 +200,18 @@ async def _describe_and_remember(context, uid: int, local_name: str, file_id: st
         logger.exception("media describe failed")
         return ""
 
+
 async def _send_media_with_followup(update: Update, context: ContextTypes.DEFAULT_TYPE, filename: str, uid: int):
     sandbox = context.application.bot_data["sandbox"]
     path = sandbox.path_for(filename)
     await send_local_file(update, path)
 
+
 async def _transcribe_and_reply(update, context, file_bytes, filename, label):
     memory = context.application.bot_data["memory"]
     groq_key = context.application.bot_data.get("groq_api_key")
     uid = update.effective_user.id
-    status = await update.message.reply_text("sun rahi hoon…")
+    status = await update.message.reply_text("sun raha hoon…")
     try:
         transcript = await transcribe_audio(file_bytes, filename, groq_key)
         preview = transcript if len(transcript) <= 1500 else transcript[:1500] + "…"
@@ -223,21 +227,20 @@ async def _transcribe_and_reply(update, context, file_bytes, filename, label):
         ctx = build_context_packet(memory, uid, user_text=preview)
         chain = build_chat_agent(
             llm, tools,
-            current_mood=ctx["mood"],
             user_profile=ctx["profile"],
             session_summary=ctx["session_summary_text"],
             last_media=ctx["last_media_text"],
-            active_fantasy=ctx["fantasy_text"],
-            emotion=ctx["emotion"],
             time_context=ctx["time_context"],
+            memory_context=ctx.get("memory_context_text", ""),
         )
         reply = await chain.ainvoke({"input": preview, "chat_history": h[:-1]})
-        if reply and str(reply).strip():
-            h.append(AIMessage(content=reply))
+        content = getattr(reply, "content", None) or str(reply) if reply else ""
+        if content and str(content).strip():
+            h.append(AIMessage(content=str(content).strip()))
             memory.save_history(uid, h, config.MAX_HISTORY_MESSAGES)
-            await send_long_text(update, reply)
+            await send_long_text(update, str(content).strip())
         else:
             await send_long_text(update, transcript)
     except Exception:
         logger.exception("transcribe failed")
-        await update.message.reply_text("Abhi sun nahi pa rahi.")
+        await update.message.reply_text("Abhi sun nahi pa raha.")

@@ -1,10 +1,10 @@
-# 😈 Telegram Bot v3
+# Telegram Bot v3
 
-> AI-first personal companion for Telegram — memory, adaptive persona, vision, voice, a custom Cloudflare MCP image library and a protected private vault.
+> AI-first personal companion for Telegram — memory, vision, voice, and a custom Cloudflare MCP image library.
 
 ## Cloudflare MCP migration
 
-The bot now uses the user's own custom cloudflare-mcp server as the remote image/data layer.
+The bot uses the user's own custom cloudflare-mcp server as the remote image/data layer.
 
 - Layered memory facade with persistent SQLite storage and dependency-free scoped memory retrieval
 - Groq tool-calling agent with dynamically discovered MCP tools
@@ -12,7 +12,7 @@ The bot now uses the user's own custom cloudflare-mcp server as the remote image
 - R2-backed image storage through ai-images-pilot
 - D1 catalog + Vectorize semantic image search
 - Native MCP image content delivered directly to Telegram
-- PBKDF2 vault security, per-user serialization and rate limiting
+- Per-user serialization and rate limiting
 - Health endpoint, structured logs, tests and Docker support
 
 ## Architecture
@@ -21,7 +21,7 @@ The bot now uses the user's own custom cloudflare-mcp server as the remote image
 Telegram
    │
    ▼
-Gateway / UI ── Auth ── Rate Limit ── Error Boundary
+Gateway / UI ── Rate Limit ── Error Boundary
    │
    ▼
 Groq Agent
@@ -79,7 +79,7 @@ No Google Drive credentials are required by the bot. Telegram uses a webhook; po
 
 ## Telegram UX
 
-The Telegram interface is prompt-first. There is no feature button grid, Drive menu, Vault/Profile/Mood/Settings menu, or legacy action-tag interface.
+The Telegram interface is prompt-first. There is no feature button grid, Drive menu, or legacy action-tag interface.
 
 Use normal language, for example:
 - Summer street style wali image dikhao
@@ -88,13 +88,11 @@ Use normal language, for example:
 - Next pending image process karo
 - Is image ko process karo
 
-
-
 ## Runtime/deployment notes
 
 - Python 3.11 is the supported runtime.
 - The bot does not use a per-user authorization/allow-list layer; Telegram updates are accepted and memory is scoped by Telegram user ID.
-- Image semantic search belongs to the custom Cloudflare MCP / Vectorize layer. The bot does not install PyTorch/CUDA just for private memory.
+- Image semantic search belongs to the custom Cloudflare MCP / Vectorize layer.
 - Docker installs the ffmpeg system binary for voice/video features.
 - Render deployments should use the webhook endpoint and an explicit `/health` check.
 
@@ -106,7 +104,8 @@ Use normal language, for example:
 4. Dynamic MCP tool discovery — implemented
 5. Natural-language image retrieval — implemented
 6. Native MCP image to Telegram delivery — implemented
-7. Local memory/vault/persona — retained
+7. Local memory / profile learning — retained
+8. Vault + adaptive persona (mood / emotion / fantasy) — removed
 
 ## Development
 
