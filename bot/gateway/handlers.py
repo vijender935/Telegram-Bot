@@ -33,12 +33,12 @@ def _strip_tool_image_markup(text: str) -> str:
     # MCP image markdown can contain a very long base64 path and may be
     # truncated before the closing ')'. Strip the whole image payload.
     text = re.sub(
-        r"!\[[^\]]*\]\((?:/|data:image/)[\\s\\S]*",
+        r"!\[[^\]]*\]\((?:/|data:image/)[\s\S]*",
         "",
         text,
     )
     text = re.sub(
-        r"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\\s]+",
+        r"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+",
         "",
         text,
     )
