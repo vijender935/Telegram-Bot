@@ -6,7 +6,7 @@
 
 The bot now uses the user's own custom cloudflare-mcp server as the remote image/data layer.
 
-- Layered memory facade with persistent SQLite storage and semantic indexing
+- Layered memory facade with persistent SQLite storage and dependency-free scoped memory retrieval
 - Groq tool-calling agent with dynamically discovered MCP tools
 - Custom Cloudflare MCP only — no official Cloudflare MCP and no third-party RAG MCP
 - R2-backed image storage through ai-images-pilot
@@ -75,7 +75,7 @@ CLOUDFLARE_MCP_TIMEOUT_SECONDS=30
 CLOUDFLARE_MCP_RETRIES=3
 ```
 
-No Google Drive credentials are required by the bot.
+No Google Drive credentials are required by the bot. Telegram uses a webhook; polling is intentionally disabled for Render-safe deployments.
 
 ## Telegram UX
 
@@ -89,6 +89,14 @@ Use normal language, for example:
 - Is image ko process karo
 
 
+
+## Runtime/deployment notes
+
+- Python 3.11 is the supported runtime.
+- The bot does not use a per-user authorization/allow-list layer; Telegram updates are accepted and memory is scoped by Telegram user ID.
+- Image semantic search belongs to the custom Cloudflare MCP / Vectorize layer. The bot does not install PyTorch/CUDA just for private memory.
+- Docker installs the ffmpeg system binary for voice/video features.
+- Render deployments should use the webhook endpoint and an explicit `/health` check.
 
 ## Migration status
 
