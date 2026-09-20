@@ -224,6 +224,13 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         response = await chain.ainvoke({"input": user_text, "chat_history": llm_history})
+        # Tool execution must be idempotent within one user turn. A provider
+        # retry or an agent loop can emit the same tool call more than once;
+        # re-running it can duplicate external side effects such as sending
+        # the same image to Telegram.
+        executed_tool_results: dict[tuple[str, str], object] = {}
+        delivered_r2_keys: set[str] = set()
+
         for _ in range(6):
             tool_calls = _extract_tool_calls(response)
             if not tool_calls:
@@ -237,7 +244,27 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                     tool_messages.append(ToolMessage(content="Unknown tool", tool_call_id=call.get("id", "unknown")))
                     continue
                 try:
-                    result = await tool.ainvoke(call.get("args", {}))
+                    call_args = call.get("args", {})
+                    try:
+                        call_signature = (
+                            call.get("name", ""),
+                            json.dumps(call_args, sort_keys=True, separators=(",", ":"), default=str),
+                        )
+                    except (TypeError, ValueError):
+                        call_signature = (call.get("name", ""), repr(call_args))
+
+                    cached_result = executed_tool_results.get(call_signature)
+                    if cached_result is not None:
+                        result = cached_result
+                        logger.info(
+                            "deduplicated repeated tool call name=%s user=%s",
+                            call.get("name"),
+                            uid,
+                        )
+                    else:
+                        result = await tool.ainvoke(call_args)
+                        executed_tool_results[call_signature] = result
+
                     image_count = 0
                     if cloudflare_mcp:
                         images = cloudflare_mcp.extract_images(result)
@@ -280,14 +307,24 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
                                             uid,
                                         )
                                         if fetched:
-                                            delivered = await _send_mcp_images(update, fetched)
-                                            image_count += delivered
-                                            logger.info(
-                                                "auto-delivered search result key=%s images=%s user=%s",
-                                                keys[0],
-                                                delivered,
-                                                uid,
-                                            )
+                                            key = keys[0]
+                                            if key in delivered_r2_keys:
+                                                logger.info(
+                                                    "suppressed duplicate image delivery key=%s user=%s",
+                                                    key,
+                                                    uid,
+                                                )
+                                            else:
+                                                delivered = await _send_mcp_images(update, fetched)
+                                                if delivered:
+                                                    delivered_r2_keys.add(key)
+                                                image_count += delivered
+                                                logger.info(
+                                                    "auto-delivered search result key=%s images=%s user=%s",
+                                                    key,
+                                                    delivered,
+                                                    uid,
+                                                )
                                             result = image_result
                                     except Exception:
                                         logger.exception(
