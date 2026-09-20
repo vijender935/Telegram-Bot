@@ -24,9 +24,9 @@ from bot.gateway.media import (
     handle_video_note,
     handle_voice,
 )
-from bot.infra.memory import MemoryStore
-from bot.infra.sandbox import SandboxStorage
-from bot.infra.serial_map import SerialMapStore
+from bot.infrastructure.memory import MemoryStore
+from bot.infrastructure.sandbox import SandboxStorage
+from bot.infrastructure.serial_map import SerialMapStore
 from bot.infrastructure.rag_mcp import CloudflareMCPClient
 from bot.domain.memory.service import MemoryService
 from bot.infrastructure.vectorstore.semantic_index import SemanticIndex
