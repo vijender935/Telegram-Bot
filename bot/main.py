@@ -111,9 +111,11 @@ async def run_bot() -> None:
         timeout=config.CLOUDFLARE_MCP_TIMEOUT_SECONDS,
         retries=config.CLOUDFLARE_MCP_RETRIES,
     )
-    await cloudflare_mcp.initialize()
-    if cloudflare_mcp.configured:
-        await cloudflare_mcp.health()
+    # Do not block Telegram/HTTP startup on a remote MCP dependency.
+    # MCP discovery can take several network round-trips (and may be temporarily
+    # unavailable), but the bot itself should still become ready and accept chat
+    # updates. The background task publishes discovered tools into bot_data when
+    # the MCP becomes available.
     web_app.config["cloudflare_mcp"] = cloudflare_mcp
 
     groq_llm = build_groq_llm()
@@ -153,9 +155,32 @@ async def run_bot() -> None:
 
     global _BOT_LOOP, _TELEGRAM_APP
     _BOT_LOOP = asyncio.get_running_loop()
+
+    # Start the Telegram application before exposing the webhook endpoint.
+    # This prevents Render/TG from sending updates while the PTB application is
+    # still initializing, and keeps the HTTP readiness path independent of MCP.
+    await app.initialize()
+    await app.start()
     _TELEGRAM_APP = app
     threading.Thread(target=run_web, daemon=True).start()
     start_scheduler(app, memory)
+
+    async def initialize_mcp_background() -> None:
+        try:
+            tools = await cloudflare_mcp.initialize()
+            app.bot_data["mcp_tools"] = tools
+            if cloudflare_mcp.configured:
+                await cloudflare_mcp.health()
+            logger.info(
+                "Cloudflare MCP background init complete | available=%s tools=%s error=%s",
+                cloudflare_mcp.available,
+                sorted(cloudflare_mcp.tool_map),
+                cloudflare_mcp.last_error,
+            )
+        except Exception:
+            logger.exception("Cloudflare MCP background initialization failed")
+
+    asyncio.create_task(initialize_mcp_background(), name="cloudflare-mcp-init")
 
     logger.info(
         "Bot v3 ready | groq=%s | gemini=%s enabled=%s | mcp=%s tools=%s",
@@ -166,8 +191,6 @@ async def run_bot() -> None:
         sorted(cloudflare_mcp.tool_map),
     )
 
-    await app.initialize()
-    await app.start()
     webhook_url = f"{config.TELEGRAM_WEBHOOK_URL}/telegram"
     await app.bot.set_webhook(
         url=webhook_url,
