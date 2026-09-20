@@ -240,9 +240,10 @@ async def _execute_tool_calls(
     llm_history,
     user_text: str,
     cloudflare_mcp,
-) -> object:
+) -> tuple[object, int]:
     executed_tool_results: dict[tuple[str, str], object] = {}
     delivered_r2_keys: set[str] = set()
+    delivered_images_total = 0
 
     for _ in range(6):
         tool_calls = _extract_tool_calls(response)
@@ -297,6 +298,7 @@ async def _execute_tool_calls(
                     images = cloudflare_mcp.extract_images(result)
                     if images:
                         image_count = await send_mcp_images(update, images)
+                        delivered_images_total += image_count
 
                     if tool_name == "search_images":
                         r2_keys = extract_r2_keys(result)
@@ -324,6 +326,7 @@ async def _execute_tool_calls(
                                         if delivered:
                                             delivered_r2_keys.add(key)
                                         image_count += delivered
+                                        delivered_images_total += delivered
                             except Exception:
                                 logger.exception("automatic get_image failed key=%s", r2_keys[0])
 
@@ -364,7 +367,7 @@ async def _execute_tool_calls(
             ]
         )
 
-    return response
+    return response, delivered_images_total
 
 
 async def _run_tools_path(
@@ -374,11 +377,17 @@ async def _run_tools_path(
     """Groq path — tools + technical prompt."""
     llm = context.application.bot_data.get("llm") or build_groq_llm()
     response_policy = infer_response_policy(user_text, ctx["profile"])
+    # get_image is an internal media-delivery primitive. Groq should not
+    # see or call it directly; search_images is the public retrieval tool.
+    public_mcp_tools = [
+        tool for tool in (mcp_tools if not force_chat_mode else [])
+        if getattr(tool, "name", "") != "get_image"
+    ]
     tools = build_tools(
         memory=memory,
         user_id=uid,
         sandbox_path=config.SANDBOX_PATH,
-        mcp_tools=mcp_tools if not force_chat_mode else [],
+        mcp_tools=public_mcp_tools,
     )
     logger.info(
         "groq tools user=%s count=%s names=%s",
@@ -410,7 +419,7 @@ async def _run_tools_path(
             [call.get("name") for call in initial_tool_calls],
             str(getattr(response, "content", ""))[:500],
         )
-        response = await _execute_tool_calls(
+        response, delivered_images = await _execute_tool_calls(
             update,
             uid,
             response,
@@ -421,6 +430,11 @@ async def _run_tools_path(
             user_text,
             cloudflare_mcp,
         )
+
+        # Successful image delivery is already the user-facing result.
+        # Do not let the model append canned follow-up suggestions.
+        if delivered_images:
+            return ""
 
         full_reply = getattr(response, "content", None)
         clean_reply = str(full_reply).strip() if full_reply else ""
