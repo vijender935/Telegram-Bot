@@ -30,8 +30,7 @@ _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 def _strip_tool_image_markup(text: str) -> str:
     """Remove image markdown emitted by MCP tools before it reaches the LLM."""
-    return re.sub(r"![[^]]*]([^
-]*?)", "", text).strip()
+    return re.sub(r"!\[[^\]]*\]\([^\n]*?\)", "", text).strip()
 
 
 def _tool_result_text(result: object, image_count: int = 0) -> str:
@@ -43,8 +42,7 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
             if getattr(item, "type", None) == "image":
                 continue
             parts.append(_tool_result_text(item, image_count=0))
-        text = "
-".join(x for x in parts if x)
+        text = "\n".join(x for x in parts if x)
     elif isinstance(result, dict):
         safe = {
             k: v for k, v in result.items()
@@ -56,8 +54,7 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
 
     text = _strip_tool_image_markup(text)
     if image_count:
-        text = (text + "
-" if text else "") + f"{image_count} image(s) retrieved and sent to the user."
+        text = (text + "\n" if text else "") + f"{image_count} image(s) retrieved and sent to the user."
     return text[:4000]
 
 
