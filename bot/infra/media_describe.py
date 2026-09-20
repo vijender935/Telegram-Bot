@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from bot.infra.vision import describe_image_bytes, describe_image_path
-from bot.infra.transcribe import ffmpeg_available
+from bot.infra.transcribe import ffmpeg_available, ffmpeg_executable
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def _extract_frames(video_path: Path, max_frames: int = 3) -> list[bytes]:
         out_pattern = str(Path(td) / "frame_%02d.jpg")
         # 1 fps, scale down for vision cost/latency
         cmd = [
-            "ffmpeg", "-y", "-i", str(video_path),
+            ffmpeg_executable(), "-y", "-i", str(video_path),
             "-vf", "fps=1,scale=640:-1",
             "-frames:v", str(max_frames),
             out_pattern,
