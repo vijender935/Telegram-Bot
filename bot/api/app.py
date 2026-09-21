@@ -28,16 +28,34 @@ def create_http_app():
 
     @app.errorhandler(404)
     def not_found(_):
-        return jsonify({"error": {"code": "not_found", "message": "Endpoint not found"}, "request_id": getattr(request, "request_id", "unknown")}), 404
+        return jsonify(
+            {
+                "error": {"code": "not_found", "message": "Endpoint not found"},
+                "request_id": getattr(request, "request_id", "unknown"),
+            }
+        ), 404
 
     @app.errorhandler(405)
     def method_not_allowed(_):
-        return jsonify({"error": {"code": "method_not_allowed", "message": "Method not allowed"}, "request_id": getattr(request, "request_id", "unknown")}), 405
+        return jsonify(
+            {
+                "error": {"code": "method_not_allowed", "message": "Method not allowed"},
+                "request_id": getattr(request, "request_id", "unknown"),
+            }
+        ), 405
 
     @app.errorhandler(Exception)
     def unhandled(exc):
-        app.logger.exception("unhandled http error request_id=%s", getattr(request, "request_id", "unknown"))
-        return jsonify({"error": {"code": "internal_error", "message": "Internal server error"}, "request_id": getattr(request, "request_id", "unknown")}), 500
+        app.logger.exception(
+            "unhandled http error request_id=%s",
+            getattr(request, "request_id", "unknown"),
+        )
+        return jsonify(
+            {
+                "error": {"code": "internal_error", "message": "Internal server error"},
+                "request_id": getattr(request, "request_id", "unknown"),
+            }
+        ), 500
 
     @app.get("/")
     def home():
@@ -61,15 +79,30 @@ def create_http_app():
             bot_loop.call_soon_threadsafe(telegram_app.update_queue.put_nowait, update)
             return "", 200
         except Exception:
-            app.logger.exception("telegram webhook enqueue failed request_id=%s", request.request_id)
-            return jsonify({"error": {"code": "enqueue_failed", "message": "Update could not be queued"}, "request_id": request.request_id}), 500
+            app.logger.exception(
+                "telegram webhook enqueue failed request_id=%s",
+                request.request_id,
+            )
+            return jsonify(
+                {
+                    "error": {"code": "enqueue_failed", "message": "Update could not be queued"},
+                    "request_id": request.request_id,
+                }
+            ), 500
 
     @app.get("/health")
     def health():
         result = app.config["health_check"]()
         return jsonify(result)
 
+    @app.get("/ready")
+    def ready():
+        result = app.config["health_check"]()
+        status = 200 if result.get("status") == "ok" else 503
+        return jsonify(result), status
+
     @app.get("/metrics")
     def metrics():
         return jsonify(app.config["metrics_snapshot"]())
+
     return app
