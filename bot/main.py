@@ -128,6 +128,17 @@ async def run_bot() -> None:
         "bot_loop": _BOT_LOOP,
         "api_timeout_seconds": config.API_TIMEOUT_SECONDS,
         "model_name": config.GROQ_MODEL,
+        "telegram_app": app,
+        "telegram_webhook_secret": config.TELEGRAM_WEBHOOK_SECRET,
+        "health_check": lambda: {
+            **check_health(config, config.MEMORY_DB_PATH),
+            "cloudflare_mcp": {
+                "configured": cloudflare_mcp.configured,
+                "available": cloudflare_mcp.available,
+                "tools": sorted(cloudflare_mcp.tool_map),
+            },
+            "model": config.GROQ_MODEL,
+        },
         "metrics_snapshot": metrics.snapshot,
     })
     http_app.config["cloudflare_mcp"] = cloudflare_mcp
