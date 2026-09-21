@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import uuid
 from collections import Counter
@@ -12,9 +13,11 @@ class Metrics:
     def __init__(self):
         self._counts = Counter()
         self._latency_ms: list[float] = []
+        self._lock = threading.Lock()
 
     def inc(self, name: str, value: int = 1) -> None:
-        self._counts[name] += value
+        with self._lock:
+            self._counts[name] += value
 
     @contextmanager
     def timer(self, name: str):
@@ -22,15 +25,19 @@ class Metrics:
         try:
             yield
         finally:
-            self._latency_ms.append((time.perf_counter() - started) * 1000)
-            self.inc(name)
-            if len(self._latency_ms) > 1000:
-                del self._latency_ms[:-1000]
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            with self._lock:
+                self._latency_ms.append(elapsed_ms)
+                if len(self._latency_ms) > 1000:
+                    del self._latency_ms[:-1000]
+                self._counts[name] += 1
 
     def snapshot(self) -> dict:
-        latency = sorted(self._latency_ms)
+        with self._lock:
+            latency = sorted(self._latency_ms)
+            counts = dict(self._counts)
         p95 = latency[min(len(latency) - 1, int(len(latency) * 0.95))] if latency else 0.0
-        return {"counters": dict(self._counts), "latency_ms_p95": round(p95, 2)}
+        return {"counters": counts, "latency_ms_p95": round(p95, 2)}
 
 metrics = Metrics()
 logger = logging.getLogger(__name__)
