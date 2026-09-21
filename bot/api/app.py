@@ -1,10 +1,14 @@
 """HTTP application factory and middleware."""
 from __future__ import annotations
+
 import time
+
 from flask import Flask, jsonify, request
 from telegram import Update
+
 from bot.api.routes import api
 from bot.core.observability import request_id
+
 
 def create_http_app():
     app = Flask(__name__)
