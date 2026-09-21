@@ -256,7 +256,10 @@ async def _execute_tool_calls(
                 if cached_result is not None:
                     result = cached_result
                 else:
-                    result = await asyncio.wait_for(\n                        tool.ainvoke(call_args),\n                        timeout=config.TOOL_TIMEOUT_SECONDS,\n                    )
+                    result = await asyncio.wait_for(
+                        tool.ainvoke(call_args),
+                        timeout=config.TOOL_TIMEOUT_SECONDS,
+                    )
                     executed_tool_results[call_signature] = result
 
                 image_count = 0
