@@ -13,7 +13,7 @@ The bot uses the user's own custom cloudflare-mcp server as the remote image/dat
 - D1 catalog + Vectorize semantic image search
 - Native MCP image content delivered directly to Telegram
 - Per-user serialization and rate limiting
-- Health endpoint, structured logs, tests and Docker support
+- Liveness/readiness endpoints, structured logs, tests and Docker support
 
 ## Architecture
 
@@ -94,7 +94,7 @@ Use normal language, for example:
 - The bot does not use a per-user authorization/allow-list layer; Telegram updates are accepted and memory is scoped by Telegram user ID.
 - Image semantic search belongs to the custom Cloudflare MCP / Vectorize layer.
 - Docker installs the ffmpeg system binary for voice/video features.
-- Render deployments should use the webhook endpoint and an explicit `/health` check.
+- Render deployments use the webhook endpoint and `/ready` for readiness checks; `/health` remains a liveness endpoint.
 
 ## Migration status
 
@@ -153,3 +153,8 @@ curl -X POST https://YOUR_HOST/v1/chat \
 Available scopes: `chat:write`, `profile:read`.
 
 The API uses per-key rate limiting, request IDs, bounded AI/tool timeouts, safe error responses, and never requires the Telegram bot token.
+
+
+### API identity boundary
+
+Each API key maps to its own persistent conversation/profile identity. The API does not accept a caller-selected Telegram user ID, so one client cannot use the REST API to read or mutate another Telegram user's memory.
