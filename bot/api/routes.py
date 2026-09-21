@@ -9,9 +9,11 @@ from bot.core.rate_limit import SlidingWindowRateLimiter
 
 api = Blueprint("api", __name__, url_prefix="/v1")
 
+
 def _bearer() -> str:
     value = request.headers.get("Authorization", "")
     return value[7:].strip() if value.lower().startswith("bearer ") else ""
+
 
 def require_scope(scope: str):
     def decorator(fn):
@@ -32,9 +34,11 @@ def require_scope(scope: str):
         return wrapped
     return decorator
 
+
 @api.get("/health")
 def api_health():
     return jsonify({"status": "ok", "service": "telegram-bot-api"})
+
 
 @api.post("/chat")
 @require_scope("chat:write")
@@ -66,10 +70,12 @@ def chat():
     log_event("api_chat", request_id=request.request_id, key_id=request.principal.key_id)
     return jsonify({"request_id": request.request_id, "response": answer, "model": current_app.config["model_name"]})
 
+
 def _stable_external_id(value: str) -> int:
     import hashlib
     raw = hashlib.sha256(value.encode()).digest()[:8]
     return int.from_bytes(raw, "big") & 0x7FFFFFFFFFFFFFFF
+
 
 @api.get("/profile")
 @require_scope("profile:read")
@@ -78,12 +84,14 @@ def profile():
     memory = current_app.config["memory"]
     return jsonify({"request_id": request.request_id, "profile": memory.get_profile(user_id)})
 
+
 @api.get("/keys")
 def list_keys():
     admin = current_app.config.get("admin_api_key", "")
     if not admin or not secrets_match(_bearer(), admin):
         return jsonify({"error": {"code": "unauthorized", "message": "Admin API key required"}}), 401
     return jsonify({"keys": current_app.config["api_key_store"].list_keys()})
+
 
 @api.post("/keys")
 def create_key():
@@ -98,12 +106,14 @@ def create_key():
     key_id, token = current_app.config["api_key_store"].create(str(payload.get("name") or "client"), scopes)
     return jsonify({"key_id": key_id, "api_key": token, "scopes": scopes}), 201
 
+
 @api.delete("/keys/<key_id>")
 def revoke_key(key_id: str):
     admin = current_app.config.get("admin_api_key", "")
     if not admin or not secrets_match(_bearer(), admin):
         return jsonify({"error": {"code": "unauthorized", "message": "Admin API key required"}}), 401
     return jsonify({"revoked": current_app.config["api_key_store"].revoke(key_id)})
+
 
 def secrets_match(a: str, b: str) -> bool:
     import hmac
