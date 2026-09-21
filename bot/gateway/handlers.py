@@ -213,7 +213,7 @@ async def _execute_tool_calls(
     delivered_r2_keys: set[str] = set()
     delivered_images_total = 0
 
-    for _ in range(6):
+    for _ in range(config.MAX_TOOL_ROUNDS):
         tool_calls = _extract_tool_calls(response)
         logger.info(
             "groq tool loop user=%s calls=%s",
@@ -256,7 +256,7 @@ async def _execute_tool_calls(
                 if cached_result is not None:
                     result = cached_result
                 else:
-                    result = await tool.ainvoke(call_args)
+                    result = await asyncio.wait_for(\n                        tool.ainvoke(call_args),\n                        timeout=config.TOOL_TIMEOUT_SECONDS,\n                    )
                     executed_tool_results[call_signature] = result
 
                 image_count = 0
