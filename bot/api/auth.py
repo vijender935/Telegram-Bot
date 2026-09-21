@@ -11,11 +11,13 @@ from pathlib import Path
 PREFIX = "tb_live_"
 
 
+
 @dataclass(frozen=True)
 class ApiPrincipal:
     key_id: str
     name: str
     scopes: frozenset[str]
+
 
 
 class ApiKeyStore:
