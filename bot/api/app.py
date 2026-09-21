@@ -10,6 +10,7 @@ from bot.api.routes import api
 from bot.core.observability import request_id
 
 
+
 def create_http_app():
     app = Flask(__name__)
     app.register_blueprint(api)
