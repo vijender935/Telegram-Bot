@@ -34,6 +34,12 @@ MEDIA_DESCRIBE_ON_DOWNLOAD = os.getenv("MEDIA_DESCRIBE_ON_DOWNLOAD", "true").low
 MEDIA_FOLLOWUP = os.getenv("MEDIA_FOLLOWUP", "true").lower() in ("1", "true", "yes")
 
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "20"))
+API_RATE_LIMIT_PER_MINUTE = int(os.getenv("API_RATE_LIMIT_PER_MINUTE", "60"))
+API_TIMEOUT_SECONDS = float(os.getenv("API_TIMEOUT_SECONDS", "90"))
+AI_REQUEST_TIMEOUT_SECONDS = float(os.getenv("AI_REQUEST_TIMEOUT_SECONDS", "75"))
+TOOL_TIMEOUT_SECONDS = float(os.getenv("TOOL_TIMEOUT_SECONDS", "30"))
+MAX_TOOL_ROUNDS = int(os.getenv("MAX_TOOL_ROUNDS", "6"))
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 CLOUDFLARE_MCP_URL = os.getenv(
@@ -69,6 +75,14 @@ def validate_startup() -> None:
         raise ConfigurationError("TELEGRAM_WEBHOOK_URL must be an HTTPS URL")
     if not TELEGRAM_WEBHOOK_SECRET:
         raise ConfigurationError("Missing required environment variable: TELEGRAM_WEBHOOK_SECRET")
+    if API_TIMEOUT_SECONDS < 10 or API_TIMEOUT_SECONDS > 180:
+        raise ConfigurationError("API_TIMEOUT_SECONDS must be between 10 and 180")
+    if AI_REQUEST_TIMEOUT_SECONDS < 5 or AI_REQUEST_TIMEOUT_SECONDS > 180:
+        raise ConfigurationError("AI_REQUEST_TIMEOUT_SECONDS must be between 5 and 180")
+    if TOOL_TIMEOUT_SECONDS < 3 or TOOL_TIMEOUT_SECONDS > 120:
+        raise ConfigurationError("TOOL_TIMEOUT_SECONDS must be between 3 and 120")
+    if MAX_TOOL_ROUNDS < 1 or MAX_TOOL_ROUNDS > 12:
+        raise ConfigurationError("MAX_TOOL_ROUNDS must be between 1 and 12")
     if CLOUDFLARE_MCP_TIMEOUT_SECONDS < 3 or CLOUDFLARE_MCP_TIMEOUT_SECONDS > 120:
         raise ConfigurationError("CLOUDFLARE_MCP_TIMEOUT_SECONDS must be between 3 and 120")
     Path(MEMORY_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
