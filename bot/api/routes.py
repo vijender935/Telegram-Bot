@@ -5,6 +5,7 @@ import asyncio
 from functools import wraps
 from flask import Blueprint, current_app, jsonify, request
 from bot.core.observability import metrics, request_id, log_event
+from bot.core.rate_limit import SlidingWindowRateLimiter
 
 api = Blueprint("api", __name__, url_prefix="/v1")
 
@@ -23,6 +24,9 @@ def require_scope(scope: str):
                 return jsonify({"error": {"code": "unauthorized", "message": "Valid API key required"}, "request_id": rid}), 401
             if scope not in principal.scopes:
                 return jsonify({"error": {"code": "forbidden", "message": "API key lacks required scope"}, "request_id": rid}), 403
+            limiter = current_app.config.get("api_rate_limiter")
+            if limiter and not limiter.allow(f"api:{principal.key_id}"):
+                return jsonify({"error": {"code": "rate_limited", "message": "Rate limit exceeded"}, "request_id": rid}), 429
             request.principal = principal
             return fn(*args, **kwargs)
         return wrapped
