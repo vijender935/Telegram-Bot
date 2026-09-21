@@ -23,6 +23,7 @@ from bot.gateway.media import (
     handle_video,
     handle_video_note,
     handle_voice,
+    cmd_voice,
 )
 from bot.infrastructure.memory import MemoryStore
 from bot.infrastructure.sandbox import SandboxStorage
@@ -131,6 +132,7 @@ async def run_bot() -> None:
 
     handlers = [
         CommandHandler("start", cmd_start),
+        CommandHandler("voice", cmd_voice),
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
         MessageHandler(filters.Document.ALL, handle_document),
         MessageHandler(filters.PHOTO, handle_photo),
