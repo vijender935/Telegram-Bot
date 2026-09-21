@@ -7,6 +7,7 @@ import uuid
 from collections import Counter
 from contextlib import contextmanager
 
+
 class Metrics:
     def __init__(self):
         self._counts = Counter()
@@ -34,8 +35,10 @@ class Metrics:
 metrics = Metrics()
 logger = logging.getLogger(__name__)
 
+
 def request_id() -> str:
     return uuid.uuid4().hex[:16]
+
 
 def log_event(event: str, **fields) -> None:
     safe = " ".join(f"{k}={v!s}" for k, v in fields.items() if v is not None)
