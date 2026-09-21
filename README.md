@@ -122,3 +122,34 @@ docker compose up --build
 ```
 
 See repository security documentation for operational guidance.
+
+
+## Production API
+
+The bot exposes a versioned HTTP API at `/v1`. Telegram credentials are never exposed to external clients.
+
+### Create an API key
+
+Set `ADMIN_API_KEY` in the deployment environment, then:
+
+```bash
+curl -X POST https://YOUR_HOST/v1/keys \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"my-client","scopes":["chat:write","profile:read"]}'
+```
+
+The response contains the API key **once**. Store it securely.
+
+### Chat
+
+```bash
+curl -X POST https://YOUR_HOST/v1/chat \
+  -H "Authorization: Bearer tb_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Hello"}'
+```
+
+Available scopes: `chat:write`, `profile:read`.
+
+The API uses per-key rate limiting, request IDs, bounded AI/tool timeouts, safe error responses, and never requires the Telegram bot token.
