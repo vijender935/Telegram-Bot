@@ -2,6 +2,7 @@
 from __future__ import annotations
 import time
 from flask import Flask, jsonify, request
+from telegram import Update
 from bot.api.routes import api
 from bot.core.observability import request_id
 
@@ -38,9 +39,31 @@ def create_http_app():
     def home():
         return jsonify({"service": "Telegram Bot", "status": "ok", "api": "/v1"})
 
+    @app.post("/telegram")
+    def telegram_webhook():
+        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        expected = app.config.get("telegram_webhook_secret", "")
+        if not expected or secret != expected:
+            return jsonify({"error": {"code": "forbidden", "message": "Invalid webhook secret"}}), 403
+        telegram_app = app.config.get("telegram_app")
+        bot_loop = app.config.get("bot_loop")
+        if not telegram_app or not bot_loop:
+            return jsonify({"error": {"code": "not_ready", "message": "Telegram application is not ready"}}), 503
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": {"code": "invalid_json", "message": "JSON body required"}}), 400
+        try:
+            update = Update.de_json(payload, bot=telegram_app.bot)
+            bot_loop.call_soon_threadsafe(telegram_app.update_queue.put_nowait, update)
+            return "", 200
+        except Exception:
+            app.logger.exception("telegram webhook enqueue failed request_id=%s", request.request_id)
+            return jsonify({"error": {"code": "enqueue_failed", "message": "Update could not be queued"}, "request_id": request.request_id}), 500
+
     @app.get("/health")
     def health():
-        return jsonify({"status": "ok", "service": "telegram-bot"})
+        result = app.config["health_check"]()
+        return jsonify(result)
 
     @app.get("/metrics")
     def metrics():
