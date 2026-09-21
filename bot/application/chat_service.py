@@ -11,6 +11,7 @@ from bot.agent.tools import build_tools
 from bot.domain.orchestrator import build_context_packet
 
 
+
 class ChatService:
     def __init__(self, memory, llm, mcp_tools=None):
         self.memory = memory
