@@ -26,7 +26,7 @@ class ChatService:
         public_tools = [t for t in self.mcp_tools if getattr(t, "name", "") != "get_image"]
         tools = build_tools(memory=self.memory, user_id=user_id, sandbox_path=config.SANDBOX_PATH, mcp_tools=public_tools)
         policy = infer_response_policy(text, ctx.get("profile")).to_prompt()
-        chain, _, model = build_chat_agent_with_components(
+        chain, system_message, model = build_chat_agent_with_components(
             self.llm, tools,
             user_profile=ctx.get("profile"),
             session_summary=ctx.get("session_summary_text", ""),
@@ -54,7 +54,7 @@ class ChatService:
                     results.append(ToolMessage(content=str(result)[:6000], tool_call_id=call.get("id", "unknown")))
                 except Exception as exc:
                     results.append(ToolMessage(content=f"Tool failed: {type(exc).__name__}", tool_call_id=call.get("id", "unknown")))
-            response = await asyncio.wait_for(model.ainvoke([*llm_history, HumanMessage(content=text), response, *results]), timeout=config.AI_REQUEST_TIMEOUT_SECONDS)
+            response = await asyncio.wait_for(model.ainvoke([system_message, *llm_history, HumanMessage(content=text), response, *results]), timeout=config.AI_REQUEST_TIMEOUT_SECONDS)
         answer = str(getattr(response, "content", "") or "").strip()
         if not answer:
             answer = "Request complete nahi ho paaya. Dobara try karo."
