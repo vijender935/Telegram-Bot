@@ -119,7 +119,13 @@ def chat():
         ), 503
 
     with metrics.timer("api.chat"):
-        future = asyncio.run_coroutine_threadsafe(service.reply(user_id, message), loop)
+        async def bounded_reply():
+            return await asyncio.wait_for(
+                service.reply(user_id, message),
+                timeout=current_app.config["api_timeout_seconds"],
+            )
+
+        future = asyncio.run_coroutine_threadsafe(bounded_reply(), loop)
         try:
             answer = future.result(timeout=current_app.config["api_timeout_seconds"])
         except TimeoutError:
