@@ -21,6 +21,7 @@ def test_http_health_and_auth(tmp_path: Path):
         api_key_store=ApiKeyStore(str(tmp_path / "api.db")),
         admin_api_key="admin-secret",
         metrics_snapshot=lambda: {"ok": True},
+        health_check=lambda: {"status": "ok"},
     )
     client = app.test_client()
     assert client.get("/health").status_code == 200
