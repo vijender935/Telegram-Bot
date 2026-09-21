@@ -16,6 +16,7 @@ from bot.agent.chat_agent import build_chat_agent_with_components, build_groq_ll
 from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
+from bot.core.observability import metrics, request_id
 from bot.gateway.mcp_media import extract_r2_keys, send_mcp_images
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏳ Thoda slow — ek minute mein bahut zyada requests aa gayi hain.")
         return
     async with _USER_LOCKS[uid]:
-        await _handle_text_locked(update, context, uid)
+        rid = request_id()
+        try:
+            await update.message.chat.send_action("typing")
+        except Exception:
+            pass
+        with metrics.timer("telegram.chat"):
+            try:
+                await _handle_text_locked(update, context, uid)
+                metrics.inc("telegram.chat.success")
+            except Exception:
+                metrics.inc("telegram.chat.failure")
+                logger.exception("chat request failed request_id=%s user=%s", rid, uid)
+                try:
+                    await update.message.reply_text(
+                        f"⚠️ Request process nahi ho paaya. Thodi der baad try karo.\nRequest ID: {rid}"
+                    )
+                except Exception:
+                    logger.exception("chat failure response failed request_id=%s", rid)
 
 
 async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE, uid: int):
@@ -195,7 +213,7 @@ async def _execute_tool_calls(
     delivered_r2_keys: set[str] = set()
     delivered_images_total = 0
 
-    for _ in range(6):
+    for _ in range(config.MAX_TOOL_ROUNDS):
         tool_calls = _extract_tool_calls(response)
         logger.info(
             "groq tool loop user=%s calls=%s",
@@ -238,7 +256,10 @@ async def _execute_tool_calls(
                 if cached_result is not None:
                     result = cached_result
                 else:
-                    result = await tool.ainvoke(call_args)
+                    result = await asyncio.wait_for(
+                        tool.ainvoke(call_args),
+                        timeout=config.TOOL_TIMEOUT_SECONDS,
+                    )
                     executed_tool_results[call_signature] = result
 
                 image_count = 0

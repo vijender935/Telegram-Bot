@@ -218,7 +218,7 @@ async def _transcribe_and_reply(update, context, file_bytes, filename, label):
         except Exception:
             pass
         llm = context.application.bot_data["llm"]
-        tools = build_tools(memory=memory, user_id=uid, sandbox_path=config.SANDBOX_PATH, mcp_tools=context.application.bot_data.get("mcp_tools", []))
+        tools = build_tools(memory=memory, user_id=uid, mcp_tools=context.application.bot_data.get("mcp_tools", []))
         ctx = build_context_packet(memory, uid, user_text=preview)
         chain = build_chat_agent(
             llm, tools,
