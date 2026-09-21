@@ -127,6 +127,7 @@ async def run_bot() -> None:
         "chat_service": chat_service,
         "bot_loop": _BOT_LOOP,
         "api_timeout_seconds": config.API_TIMEOUT_SECONDS,
+        "api_rate_limiter": SlidingWindowRateLimiter(config.API_RATE_LIMIT_PER_MINUTE, 60),
         "model_name": config.GROQ_MODEL,
         "telegram_app": app,
         "telegram_webhook_secret": config.TELEGRAM_WEBHOOK_SECRET,
