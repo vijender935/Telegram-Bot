@@ -25,4 +25,44 @@ def test_http_health_and_auth(tmp_path: Path):
     )
     client = app.test_client()
     assert client.get("/health").status_code == 200
+    assert client.get("/ready").status_code == 200
     assert client.post("/v1/keys", headers={"Authorization": "Bearer wrong"}).status_code == 401
+
+
+def test_ready_returns_503_when_degraded(tmp_path: Path):
+    app = create_http_app()
+    app.config.update(
+        api_key_store=ApiKeyStore(str(tmp_path / "api.db")),
+        admin_api_key="admin-secret",
+        metrics_snapshot=lambda: {"ok": True},
+        health_check=lambda: {"status": "degraded"},
+    )
+    client = app.test_client()
+    assert client.get("/health").status_code == 200
+    assert client.get("/ready").status_code == 503
+
+
+def test_api_identity_is_scoped_to_api_key(tmp_path: Path):
+    from unittest.mock import AsyncMock
+
+    from bot.api.routes import _stable_external_id
+
+    app = create_http_app()
+    store = ApiKeyStore(str(tmp_path / "api.db"))
+    _, token = store.create("client", ["profile:read"])
+    memory = type("Memory", (), {"get_profile": lambda self, user_id: {"user_id": user_id}})()
+    app.config.update(
+        api_key_store=store,
+        admin_api_key="admin-secret",
+        api_rate_limiter=None,
+        memory=memory,
+        health_check=lambda: {"status": "ok"},
+        metrics_snapshot=lambda: {"ok": True},
+    )
+    client = app.test_client()
+    response = client.get(
+        "/v1/profile?user_id=999999",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["profile"]["user_id"] == _stable_external_id(store.list_keys()[0]["key_id"])
