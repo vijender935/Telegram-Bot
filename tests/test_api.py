@@ -43,8 +43,6 @@ def test_ready_returns_503_when_degraded(tmp_path: Path):
 
 
 def test_api_identity_is_scoped_to_api_key(tmp_path: Path):
-    from unittest.mock import AsyncMock
-
     from bot.api.routes import _stable_external_id
 
     app = create_http_app()
@@ -65,4 +63,5 @@ def test_api_identity_is_scoped_to_api_key(tmp_path: Path):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
-    assert response.get_json()["profile"]["user_id"] == _stable_external_id(store.list_keys()[0]["key_id"])
+    expected_id = _stable_external_id(store.list_keys()[0]["key_id"])
+    assert response.get_json()["profile"]["user_id"] == expected_id
