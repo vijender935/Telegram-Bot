@@ -7,7 +7,6 @@ from langchain_core.tools import BaseTool, tool
 def build_tools(
     memory=None,
     user_id: int | None = None,
-    sandbox_path: str | None = None,
     mcp_tools: list[BaseTool] | None = None,
 ) -> list[BaseTool]:
     tools: list[BaseTool] = []
