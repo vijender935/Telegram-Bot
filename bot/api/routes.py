@@ -5,7 +5,6 @@ import asyncio
 from functools import wraps
 from flask import Blueprint, current_app, jsonify, request
 from bot.core.observability import metrics, request_id, log_event
-from bot.core.rate_limit import SlidingWindowRateLimiter
 
 api = Blueprint("api", __name__, url_prefix="/v1")
 
