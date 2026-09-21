@@ -65,3 +65,26 @@ def test_api_identity_is_scoped_to_api_key(tmp_path: Path):
     assert response.status_code == 200
     expected_id = _stable_external_id(store.list_keys()[0]["key_id"])
     assert response.get_json()["profile"]["user_id"] == expected_id
+
+
+def test_chat_service_sanitizes_media_tool_output():
+    from bot.application.chat_service import ChatService
+
+    result = ChatService._tool_result_for_model(
+        "search_images",
+        {"type": "image", "data": "a" * 100000},
+    )
+    assert "base64" not in result
+    assert "100000" not in result
+    assert "not available" in result
+
+
+def test_chat_service_sanitizes_embedded_image_markup():
+    from bot.application.chat_service import ChatService
+
+    result = ChatService._tool_result_for_model(
+        "custom_tool",
+        "![image](data:image/png;base64," + "a" * 100000 + ")",
+    )
+    assert "data:image" not in result
+    assert "not available" in result
