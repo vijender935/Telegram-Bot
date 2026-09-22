@@ -1,1 +1,1 @@
-"""Application services: orchestration around domain and infrastructure."""
+"""Application services shared by Telegram and HTTP adapters."""

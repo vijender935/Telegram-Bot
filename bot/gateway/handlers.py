@@ -1,31 +1,43 @@
 import asyncio
-import io
 import json
 import logging
+import re
 from collections import defaultdict
 
 from telegram import Update
 from telegram.ext import ContextTypes
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from PIL import Image, UnidentifiedImageError
 
 from bot import config
 from bot.gateway.formatters import send_long_text
 from bot.domain.orchestrator import build_context_packet, maybe_update_session_summary
 from bot.domain.learning import should_extract, extract_and_merge
-from bot.agent.chat_agent import (
-    build_chat_agent_with_components,
-    build_groq_llm,
-    build_gemini_llm,
-)
-from bot.agent.router import route_task
+from bot.agent.chat_agent import build_chat_agent_with_components, build_groq_llm
 from bot.agent.response_policy import infer_response_policy
 from bot.agent.tools import build_tools
 from bot.core.exceptions import BotError
-from bot.infra.vision import describe_image_bytes
+from bot.core.observability import metrics, request_id
+from bot.gateway.mcp_media import extract_r2_keys, send_mcp_images
 
 logger = logging.getLogger(__name__)
 _USER_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+
+def _strip_tool_image_markup(text: str) -> str:
+    """Remove image markdown/base64 payloads emitted by MCP tools."""
+    # MCP image markdown can contain a very long base64 path and may be
+    # truncated before the closing ')'. Strip the whole image payload.
+    text = re.sub(
+        r"!\[[^\]]*\]\((?:/|data:image/)[\s\S]*",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+",
+        "",
+        text,
+    )
+    return text.strip()
 
 
 def _tool_result_text(result: object, image_count: int = 0) -> str:
@@ -47,113 +59,39 @@ def _tool_result_text(result: object, image_count: int = 0) -> str:
     else:
         text = str(result)
 
+    text = _strip_tool_image_markup(text)
     if image_count:
         text = (text + "\n" if text else "") + f"{image_count} image(s) retrieved and sent to the user."
     return text[:4000]
 
 
-async def _send_mcp_images(
-    update: Update,
-    images: list[tuple[bytes, str]],
-    caption: str | None = None,
-) -> int:
-    sent = 0
-    for index, (data, mime_type) in enumerate(images, start=1):
-        if not data:
-            continue
+def _llm_tool_result(
+    result: object,
+    tool_name: str,
+    image_count: int = 0,
+    r2_key_count: int = 0,
+) -> str:
+    """Build an LLM-safe summary; never expose MCP media payloads to the model."""
+    if tool_name == "search_images":
+        summary = f"search_images completed; {r2_key_count} matching image object(s) found."
+        if image_count:
+            summary += f" {image_count} image(s) were delivered to the user."
+        elif r2_key_count:
+            summary += " The matching image could not be delivered."
+        return summary
 
-        filename = f"cloudflare_image_{index}.jpg"
-        try:
-            with Image.open(io.BytesIO(data)) as source:
-                source.load()
-                width, height = source.size
-                if width <= 0 or height <= 0:
-                    raise ValueError("invalid image dimensions")
-                if source.mode in ("RGBA", "LA", "P"):
-                    rgba = source.convert("RGBA")
-                    background = Image.new("RGB", rgba.size, "white")
-                    background.paste(rgba, mask=rgba.getchannel("A"))
-                    normalized = background
-                else:
-                    normalized = source.convert("RGB")
+    if tool_name == "get_image":
+        if image_count:
+            return f"get_image completed; {image_count} image(s) were delivered to the user."
+        return "get_image completed, but no image was available for delivery."
 
-                buffer = io.BytesIO()
-                normalized.save(buffer, format="JPEG", quality=92, optimize=True)
-                payload = buffer.getvalue()
+    if image_count:
+        return (
+            f"{tool_name} completed; {image_count} image(s) were delivered to the user. "
+            "Image binary/base64 content is intentionally not included in the tool result."
+        )
 
-            if len(payload) > 10 * 1024 * 1024:
-                await update.message.reply_document(
-                    document=io.BytesIO(payload),
-                    filename=filename,
-                    caption=caption if sent == 0 else None,
-                )
-            else:
-                await update.message.reply_photo(
-                    photo=io.BytesIO(payload),
-                    filename=filename,
-                    caption=caption if sent == 0 else None,
-                )
-            sent += 1
-        except (UnidentifiedImageError, OSError, ValueError) as exc:
-            logger.warning(
-                "MCP image normalization failed index=%s mime=%s bytes=%s error=%s",
-                index, mime_type, len(data), exc,
-            )
-            try:
-                await update.message.reply_document(
-                    document=io.BytesIO(data),
-                    filename=f"cloudflare_image_{index}.bin",
-                    caption=caption if sent == 0 else None,
-                )
-                sent += 1
-            except Exception:
-                logger.exception("MCP image delivery failed index=%s", index)
-
-    return sent
-
-
-def _extract_r2_keys(value: object) -> list[str]:
-    found: list[str] = []
-    seen: set[str] = set()
-
-    def add(value: object) -> None:
-        if not isinstance(value, str) or not value or value in seen:
-            return
-        seen.add(value)
-        found.append(value)
-
-    def walk(item: object) -> None:
-        if isinstance(item, str):
-            raw = item.strip()
-            if raw.startswith("{") or raw.startswith("["):
-                try:
-                    walk(json.loads(raw))
-                except json.JSONDecodeError:
-                    pass
-            return
-        if isinstance(item, (list, tuple)):
-            for child in item:
-                walk(child)
-            return
-        if isinstance(item, dict):
-            for key_name in ("r2_key", "r2Key"):
-                value = item.get(key_name)
-                if isinstance(value, str):
-                    add(value)
-            metadata = item.get("metadata")
-            if metadata is not None:
-                walk(metadata)
-            for key_name in ("matches", "images", "results", "content"):
-                child = item.get(key_name)
-                if child is not None:
-                    walk(child)
-            return
-        content = getattr(item, "content", None)
-        if content is not None and content is not item:
-            walk(content)
-
-    walk(value)
-    return found
+    return _tool_result_text(result)
 
 
 def _extract_tool_calls(response: object) -> list[dict]:
@@ -192,7 +130,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏳ Thoda slow — ek minute mein bahut zyada requests aa gayi hain.")
         return
     async with _USER_LOCKS[uid]:
-        await _handle_text_locked(update, context, uid)
+        rid = request_id()
+        try:
+            await update.message.chat.send_action("typing")
+        except Exception:
+            pass
+        with metrics.timer("telegram.chat"):
+            try:
+                await _handle_text_locked(update, context, uid)
+                metrics.inc("telegram.chat.success")
+            except Exception:
+                metrics.inc("telegram.chat.failure")
+                logger.exception("chat request failed request_id=%s user=%s", rid, uid)
+                try:
+                    await update.message.reply_text(
+                        f"⚠️ Request process nahi ho paaya. Thodi der baad try karo.\nRequest ID: {rid}"
+                    )
+                except Exception:
+                    logger.exception("chat failure response failed request_id=%s", rid)
 
 
 async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE, uid: int):
@@ -201,22 +156,16 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
     cloudflare_mcp = context.application.bot_data.get("cloudflare_mcp")
     mcp_tools = context.application.bot_data.get("mcp_tools", [])
 
-    task = route_task(user_text)
-    logger.info("route task=%s user=%s", task, uid)
+    logger.info("groq path user=%s", uid)
 
     ctx = build_context_packet(memory, uid, user_text=user_text)
     history = memory.get_history(uid)
     llm_history = history[-config.LLM_HISTORY_MESSAGES:] if config.LLM_HISTORY_MESSAGES else []
 
-    if task == "chat" and config.GEMINI_ENABLED:
-        clean_reply = await _run_chat_path(
-            update, context, uid, user_text, ctx, llm_history, memory
-        )
-    else:
-        clean_reply = await _run_tools_path(
-            update, context, uid, user_text, ctx, llm_history, memory,
-            cloudflare_mcp, mcp_tools,
-        )
+    clean_reply = await _run_tools_path(
+        update, context, uid, user_text, ctx, llm_history, memory,
+        cloudflare_mcp, mcp_tools,
+    )
 
     if clean_reply is None:
         return
@@ -249,59 +198,166 @@ async def _handle_text_locked(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.exception("session summary update failed user=%s", uid)
 
 
-async def _run_chat_path(
-    update, context, uid, user_text, ctx, llm_history, memory
-) -> str | None:
-    """Gemini path — pure conversation, no tools, identity prompt."""
-    try:
-        llm = context.application.bot_data.get("gemini_llm")
-        if llm is None:
-            llm = build_gemini_llm()
-            context.application.bot_data["gemini_llm"] = llm
+async def _execute_tool_calls(
+    update,
+    uid: int,
+    response,
+    tools,
+    tool_model,
+    system_message,
+    llm_history,
+    user_text: str,
+    cloudflare_mcp,
+) -> tuple[object, int]:
+    executed_tool_results: dict[tuple[str, str], object] = {}
+    delivered_r2_keys: set[str] = set()
+    delivered_images_total = 0
 
-        chain, _, _ = build_chat_agent_with_components(
-            llm,
-            tools=[],  # no tools on chat path — keeps Gemini natural
-            user_profile=ctx["profile"],
-            session_summary=ctx["session_summary_text"],
-            last_media=ctx["last_media_text"],
-            time_context=ctx["time_context"],
-            memory_context=ctx.get("memory_context_text", ""),
-            mode="chat",
+    for _ in range(config.MAX_TOOL_ROUNDS):
+        tool_calls = _extract_tool_calls(response)
+        logger.info(
+            "groq tool loop user=%s calls=%s",
+            uid,
+            [call.get("name") for call in tool_calls],
         )
-        response = await chain.ainvoke({"input": user_text, "chat_history": llm_history})
-        full_reply = getattr(response, "content", None)
-        clean_reply = str(full_reply).strip() if full_reply else ""
-        if not clean_reply:
-            clean_reply = "hmm... bol na, sun rahi hoon."
-        return clean_reply
-    except BotError:
-        logger.exception("gemini chat failed user=%s", uid)
-        await update.message.reply_text("Thodi der baad try karo.")
-        return None
-    except Exception:
-        logger.exception("gemini chat failed user=%s — falling back to groq", uid)
-        # soft fallback to tools path without tools
-        return await _run_tools_path(
-            update, context, uid, user_text, ctx, llm_history, memory,
-            None, [], force_chat_mode=True,
+        if not tool_calls:
+            break
+
+        tool_map = {tool.name: tool for tool in tools}
+        tool_messages = []
+        for call in tool_calls:
+            tool = tool_map.get(call.get("name"))
+            if not tool:
+                logger.error("unknown tool requested name=%s user=%s", call.get("name"), uid)
+                tool_messages.append(
+                    ToolMessage(
+                        content="Unknown tool",
+                        tool_call_id=call.get("id", "unknown"),
+                    )
+                )
+                continue
+
+            try:
+                call_args = call.get("args", {})
+                try:
+                    call_signature = (
+                        call.get("name", ""),
+                        json.dumps(
+                            call_args,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            default=str,
+                        ),
+                    )
+                except (TypeError, ValueError):
+                    call_signature = (call.get("name", ""), repr(call_args))
+
+                cached_result = executed_tool_results.get(call_signature)
+                if cached_result is not None:
+                    result = cached_result
+                else:
+                    result = await asyncio.wait_for(
+                        tool.ainvoke(call_args),
+                        timeout=config.TOOL_TIMEOUT_SECONDS,
+                    )
+                    executed_tool_results[call_signature] = result
+
+                image_count = 0
+                r2_keys: list[str] = []
+                tool_name = call.get("name") or ""
+                if cloudflare_mcp:
+                    images = cloudflare_mcp.extract_images(result)
+                    if images:
+                        image_count = await send_mcp_images(update, images)
+                        delivered_images_total += image_count
+
+                    if tool_name == "search_images":
+                        r2_keys = extract_r2_keys(result)
+                        if r2_keys:
+                            try:
+                                image_result = await cloudflare_mcp.invoke_raw(
+                                    "get_image", {"key": r2_keys[0]}
+                                )
+                                fetched = cloudflare_mcp.extract_images(image_result)
+                                if fetched:
+                                    key = r2_keys[0]
+                                    if key not in delivered_r2_keys:
+                                        # Image-only delivery: do not generate or attach a caption.
+                                        delivered = await send_mcp_images(
+                                            update, fetched, caption=None
+                                        )
+                                        if delivered:
+                                            delivered_r2_keys.add(key)
+                                        image_count += delivered
+                                        delivered_images_total += delivered
+                            except Exception:
+                                logger.exception("automatic get_image failed key=%s", r2_keys[0])
+
+                tool_messages.append(
+                    ToolMessage(
+                        content=_llm_tool_result(
+                            result,
+                            tool_name,
+                            image_count=image_count,
+                            r2_key_count=len(r2_keys),
+                        ),
+                        tool_call_id=call.get("id", "unknown"),
+                    )
+                )
+            except Exception as exc:
+                logger.exception(
+                    "tool execution failed name=%s user=%s",
+                    call.get("name"),
+                    uid,
+                )
+                tool_messages.append(
+                    ToolMessage(
+                        content=(
+                            f"Tool execution failed ({type(exc).__name__}). "
+                            "Do not pretend it succeeded."
+                        ),
+                        tool_call_id=call.get("id", "unknown"),
+                    )
+                )
+
+        response = await tool_model.ainvoke(
+            [
+                system_message,
+                *llm_history,
+                HumanMessage(content=user_text),
+                response,
+                *tool_messages,
+            ]
         )
+
+    return response, delivered_images_total
 
 
 async def _run_tools_path(
     update, context, uid, user_text, ctx, llm_history, memory,
-    cloudflare_mcp, mcp_tools, force_chat_mode: bool = False,
+    cloudflare_mcp, mcp_tools,
 ) -> str | None:
-    """Groq path — tools + technical prompt."""
+    """Single Groq path — assistant + tools."""
     llm = context.application.bot_data.get("llm") or build_groq_llm()
     response_policy = infer_response_policy(user_text, ctx["profile"])
+    # get_image is an internal media-delivery primitive. Groq should not
+    # see or call it directly; search_images is the public retrieval tool.
+    public_mcp_tools = [
+        tool for tool in mcp_tools
+        if getattr(tool, "name", "") != "get_image"
+    ]
     tools = build_tools(
         memory=memory,
         user_id=uid,
         sandbox_path=config.SANDBOX_PATH,
-        mcp_tools=mcp_tools if not force_chat_mode else [],
+        mcp_tools=public_mcp_tools,
     )
-    mode = "chat" if force_chat_mode else "tools"
+    logger.info(
+        "groq tools user=%s count=%s names=%s",
+        uid,
+        len(tools),
+        [getattr(tool, "name", type(tool).__name__) for tool in tools],
+    )
     chain, system_message, tool_model = build_chat_agent_with_components(
         llm, tools,
         user_profile=ctx["profile"],
@@ -310,93 +366,36 @@ async def _run_tools_path(
         time_context=ctx["time_context"],
         memory_context=ctx.get("memory_context_text", ""),
         response_policy=response_policy.to_prompt(),
-        mode=mode,
     )
 
     try:
-        response = await chain.ainvoke({"input": user_text, "chat_history": llm_history})
-        executed_tool_results: dict[tuple[str, str], object] = {}
-        delivered_r2_keys: set[str] = set()
+        response = await chain.ainvoke(
+            {"input": user_text, "chat_history": llm_history}
+        )
+        initial_tool_calls = _extract_tool_calls(response)
+        logger.info(
+            "groq initial response user=%s type=%s tool_calls=%s content=%r",
+            uid,
+            type(response).__name__,
+            [call.get("name") for call in initial_tool_calls],
+            str(getattr(response, "content", ""))[:500],
+        )
+        response, delivered_images = await _execute_tool_calls(
+            update,
+            uid,
+            response,
+            tools,
+            tool_model,
+            system_message,
+            llm_history,
+            user_text,
+            cloudflare_mcp,
+        )
 
-        for _ in range(6):
-            tool_calls = _extract_tool_calls(response)
-            if not tool_calls:
-                break
-            tool_map = {tool.name: tool for tool in tools}
-            tool_messages = []
-            for call in tool_calls:
-                tool = tool_map.get(call.get("name"))
-                if not tool:
-                    logger.error("unknown tool requested name=%s user=%s", call.get("name"), uid)
-                    tool_messages.append(ToolMessage(content="Unknown tool", tool_call_id=call.get("id", "unknown")))
-                    continue
-                try:
-                    call_args = call.get("args", {})
-                    try:
-                        call_signature = (
-                            call.get("name", ""),
-                            json.dumps(call_args, sort_keys=True, separators=(",", ":"), default=str),
-                        )
-                    except (TypeError, ValueError):
-                        call_signature = (call.get("name", ""), repr(call_args))
-
-                    cached_result = executed_tool_results.get(call_signature)
-                    if cached_result is not None:
-                        result = cached_result
-                    else:
-                        result = await tool.ainvoke(call_args)
-                        executed_tool_results[call_signature] = result
-
-                    image_count = 0
-                    if cloudflare_mcp:
-                        images = cloudflare_mcp.extract_images(result)
-                        if images:
-                            image_count = await _send_mcp_images(update, images)
-
-                        if call.get("name") == "search_images":
-                            keys = _extract_r2_keys(result)
-                            if keys:
-                                try:
-                                    image_result = await cloudflare_mcp.invoke_raw("get_image", {"key": keys[0]})
-                                    fetched = cloudflare_mcp.extract_images(image_result)
-                                    if fetched:
-                                        key = keys[0]
-                                        if key not in delivered_r2_keys:
-                                            caption = None
-                                            try:
-                                                caption = await describe_image_bytes(
-                                                    fetched[0][0], "cloudflare_image_1.jpg",
-                                                )
-                                                caption = (caption or "").strip()[:1024] or None
-                                            except Exception:
-                                                logger.exception("image caption failed key=%s", key)
-                                            delivered = await _send_mcp_images(update, fetched, caption=caption)
-                                            if delivered:
-                                                delivered_r2_keys.add(key)
-                                            image_count += delivered
-                                        result = image_result
-                                except Exception:
-                                    logger.exception("automatic get_image failed key=%s", keys[0])
-
-                    tool_messages.append(
-                        ToolMessage(
-                            content=_tool_result_text(result, image_count),
-                            tool_call_id=call.get("id", "unknown"),
-                        )
-                    )
-                except Exception as exc:
-                    logger.exception("tool execution failed name=%s user=%s", call.get("name"), uid)
-                    tool_messages.append(ToolMessage(
-                        content=f"Tool execution failed ({type(exc).__name__}). Do not pretend it succeeded.",
-                        tool_call_id=call.get("id", "unknown"),
-                    ))
-            response = await tool_model.ainvoke([
-                system_message,
-                *llm_history,
-                HumanMessage(content=user_text),
-                response,
-                *tool_messages,
-            ])
+        # Successful image delivery is already the user-facing result.
+        # Do not let the model append canned follow-up suggestions.
+        if delivered_images:
+            return ""
 
         full_reply = getattr(response, "content", None)
         clean_reply = str(full_reply).strip() if full_reply else ""
@@ -410,9 +409,13 @@ async def _run_tools_path(
 
     except BotError:
         logger.exception("groq path failed user=%s", uid)
-        await update.message.reply_text("Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo.")
+        await update.message.reply_text(
+            "Is request ka answer abhi complete nahi ho paaya. Thodi der baad try karo."
+        )
         return None
     except Exception:
         logger.exception("groq path failed user=%s", uid)
-        await update.message.reply_text("AI response generate nahi ho paaya. Thodi der mein dobara try karo.")
+        await update.message.reply_text(
+            "AI response generate nahi ho paaya. Thodi der mein dobara try karo."
+        )
         return None

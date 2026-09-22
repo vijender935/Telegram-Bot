@@ -6,8 +6,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from bot.infra.vision import describe_image_bytes, describe_image_path
-from bot.infra.transcribe import ffmpeg_available, ffmpeg_executable
+from bot.infrastructure.vision import describe_image_bytes, describe_image_path
+from bot.infrastructure.transcribe import ffmpeg_available, ffmpeg_executable
 
 logger = logging.getLogger(__name__)
 

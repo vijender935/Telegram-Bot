@@ -2,23 +2,33 @@
 
 ## Scope
 
-This bot handles Telegram messages, media metadata, AI prompts, Google Drive access and vault credentials. Treat production secrets and the SQLite database as sensitive.
+This bot handles Telegram messages and media, AI prompts, a local SQLite database, and a custom Cloudflare MCP integration. Treat production secrets, API keys, SQLite data, and downloaded media as sensitive.
 
 ## Operational checklist
 
-- Configure `ALLOWED_USER_IDS` in production.
-- Never commit `.env`, service-account JSON or API keys.
+- Never commit `.env`, provider credentials, webhook secrets, API keys or database files.
+- Configure `TELEGRAM_WEBHOOK_SECRET` and `ADMIN_API_KEY` with long random values in production.
 - Mount a persistent disk for SQLite and back it up regularly.
-- Rotate provider credentials if exposed.
-- Keep the bot on a single worker while using SQLite/in-process rate limits.
-- Review vault backups carefully because the vault currently stores Telegram file references; credential protection does not make the referenced Telegram media cryptographically encrypted.
+- Keep the bot on a single worker while using SQLite and in-process rate limiting.
+- Rotate provider credentials immediately if they are exposed.
+- Treat API keys as bearer credentials; store client keys securely and revoke them when compromised.
+- Keep the custom Cloudflare MCP endpoint and API key restricted to the required resources.
 
-## Vault threat model
+## API security
 
-v3 improves authentication with PBKDF2-SHA256, temporary lockout and short unlock sessions. This protects the access credential but is **not equivalent to encrypted file storage**. Telegram file IDs and media remain governed by Telegram's storage/access model.
+- REST endpoints use scoped API keys with SHA-256 token hashes stored in SQLite.
+- API identity is derived from the authenticated key; callers cannot select an arbitrary Telegram user ID.
+- Administrative key-management endpoints require the separate `ADMIN_API_KEY`.
+- API requests are rate-limited and AI/tool execution has bounded timeouts.
+- Media/base64 MCP payloads are not returned through the text REST API.
+- Telegram webhook requests require the configured Telegram secret token.
 
-If cryptographic at-rest protection is required, introduce an encrypted object-storage layer before claiming the vault is an encrypted vault.
+## Data protection
+
+SQLite contains conversation history, profiles, session summaries, media metadata and API-key metadata. The API-key database stores token hashes, not plaintext client tokens.
+
+The bot may download Telegram media to the configured sandbox for processing. Apply appropriate persistent-disk access controls and retention policies.
 
 ## Reporting
 
-Do not publish credentials, tokens, private media or database files in issues. Rotate exposed secrets immediately and report the vulnerability privately to the repository owner.
+Do not publish credentials, tokens, private media or database files in issues. Rotate exposed secrets immediately and report vulnerabilities privately to the repository owner.

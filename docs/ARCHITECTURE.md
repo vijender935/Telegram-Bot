@@ -3,29 +3,41 @@
 ## Request lifecycle
 
 ```text
-Telegram update
-  -> allowlist / rate limit
+Telegram webhook
+  -> gateway
   -> per-user serialization
   -> context + memory retrieval
-  -> LLM response
-  -> validated action tags (compatibility)
-  -> tool/action execution
+  -> LLM + bounded tool loop
   -> response rendering
   -> profile/session learning
+
+External REST client
+  -> API-key authentication + scope check
+  -> per-key rate limit
+  -> application ChatService
+  -> context + memory retrieval
+  -> LLM + bounded tool loop
+  -> text-only response
 ```
 
 ## Boundaries
 
-- `gateway/`: Telegram transport and presentation.
-- `application/`: orchestration and use-case facades.
-- `domain/`: intent, emotion, mood, learning and memory policy.
-- `infra/`: external providers and legacy persistence adapters.
-- `core/`: cross-cutting errors, security, health and logging.
-- `infrastructure/vectorstore/`: persistent semantic retrieval.
+- `gateway/`: Telegram transport, commands, media handling and presentation.
+- `api/`: versioned REST transport, authentication, scopes, rate limiting and HTTP error handling.
+- `application/`: shared use-case services such as `ChatService`.
+- `domain/`: conversation context, learning policy and memory-facing business logic.
+- `infrastructure/`: SQLite persistence, Cloudflare MCP, media processing and external provider adapters.
+- `agent/`: LLM prompt construction, response policy and runtime tool assembly.
+- `core/`: configuration, errors, health, security, rate limiting and observability.
 
-## Migration strategy
+## Production invariants
 
-The project deliberately keeps the existing `bot.gateway` and `bot.infra` modules as compatibility boundaries. New capabilities are introduced through application/core layers first, then handlers can migrate module-by-module. This prevents a full rewrite from breaking the live bot.
+- Telegram and REST clients share the same application-level chat service semantics.
+- REST identity is scoped to the authenticated API key; callers cannot select another user's Telegram ID.
+- Tool execution is bounded by per-tool timeouts and a configurable maximum number of rounds.
+- Media/base64 MCP payloads are not returned through the text REST API.
+- SQLite connections use WAL + busy timeouts for the single-worker deployment model.
+- `/health` is a liveness endpoint; `/ready` is the deployment readiness endpoint and returns HTTP 503 while required checks are degraded.
 
 ## Scaling boundary
 
