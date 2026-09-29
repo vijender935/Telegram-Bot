@@ -24,7 +24,7 @@ def test_safe_url_hides_credentials():
 
 
 def test_extract_r2_keys_from_search_result():
-    from bot.gateway.handlers import _extract_r2_keys
+    from bot.gateway.mcp_media import extract_r2_keys
 
     payload = {
         "matches": [
@@ -33,7 +33,7 @@ def test_extract_r2_keys_from_search_result():
         ],
         "images": [{"r2_key": "photos/red-crop-top.jpg"}],
     }
-    assert _extract_r2_keys(payload) == [
+    assert extract_r2_keys(payload) == [
         "photos/red-crop-top.jpg",
         "photos/other.jpg",
     ]

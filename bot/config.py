@@ -16,16 +16,6 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
-# Gemini (chat / personality path)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
-GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.95"))
-GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "1024"))
-GEMINI_ENABLED = os.getenv("GEMINI_ENABLED", "true").lower() in ("1", "true", "yes")
-
-HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "").strip()
-
 SANDBOX_PATH = os.getenv("SANDBOX_PATH", "/var/data/bot_files" if os.path.isdir("/var/data") else "/tmp/bot_files")
 MEMORY_DB_PATH = os.getenv("MEMORY_DB_PATH", "/var/data/bot_memory.db" if os.path.isdir("/var/data") else "/tmp/bot_memory.db")
 PORT = int(os.getenv("PORT", "8080"))
@@ -33,9 +23,7 @@ PORT = int(os.getenv("PORT", "8080"))
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
 GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b").strip()
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "1200"))
-GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.7"))
-# legacy alias
-TEMPERATURE = float(os.getenv("TEMPERATURE", str(GROQ_TEMPERATURE)))
+GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.95"))
 
 SERIAL_MAP_TTL_SECONDS = int(os.getenv("SERIAL_MAP_TTL_SECONDS", str(30 * 60)))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
@@ -46,6 +34,13 @@ MEDIA_DESCRIBE_ON_DOWNLOAD = os.getenv("MEDIA_DESCRIBE_ON_DOWNLOAD", "true").low
 MEDIA_FOLLOWUP = os.getenv("MEDIA_FOLLOWUP", "true").lower() in ("1", "true", "yes")
 
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "20"))
+API_RATE_LIMIT_PER_MINUTE = int(os.getenv("API_RATE_LIMIT_PER_MINUTE", "60"))
+API_TIMEOUT_SECONDS = float(os.getenv("API_TIMEOUT_SECONDS", "90"))
+AI_REQUEST_TIMEOUT_SECONDS = float(os.getenv("AI_REQUEST_TIMEOUT_SECONDS", "75"))
+TOOL_TIMEOUT_SECONDS = float(os.getenv("TOOL_TIMEOUT_SECONDS", "30"))
+MAX_TOOL_ROUNDS = int(os.getenv("MAX_TOOL_ROUNDS", "6"))
+MAX_API_MESSAGE_CHARS = int(os.getenv("MAX_API_MESSAGE_CHARS", "8000"))
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 CLOUDFLARE_MCP_URL = os.getenv(
@@ -67,14 +62,16 @@ def validate_startup() -> None:
         missing.append("TELEGRAM_BOT_TOKEN")
     if not GROQ_API_KEY:
         missing.append("GROQ_API_KEY")
-    if GEMINI_ENABLED and not GEMINI_API_KEY:
-        missing.append("GEMINI_API_KEY")
+    if not ADMIN_API_KEY:
+        missing.append("ADMIN_API_KEY")
     if missing:
         raise ConfigurationError("Missing required environment variables: " + ", ".join(missing))
+    if RATE_LIMIT_PER_MINUTE < 1:
+        raise ConfigurationError("RATE_LIMIT_PER_MINUTE must be at least 1")
+    if API_RATE_LIMIT_PER_MINUTE < 1:
+        raise ConfigurationError("API_RATE_LIMIT_PER_MINUTE must be at least 1")
     if not 0 <= GROQ_TEMPERATURE <= 2:
         raise ConfigurationError("GROQ_TEMPERATURE must be between 0 and 2")
-    if not 0 <= GEMINI_TEMPERATURE <= 2:
-        raise ConfigurationError("GEMINI_TEMPERATURE must be between 0 and 2")
     if GROQ_MAX_TOKENS < 256 or GROQ_MAX_TOKENS > 4096:
         raise ConfigurationError("GROQ_MAX_TOKENS must be between 256 and 4096")
     if LLM_HISTORY_MESSAGES < 0 or LLM_HISTORY_MESSAGES > MAX_HISTORY_MESSAGES:
@@ -85,6 +82,16 @@ def validate_startup() -> None:
         raise ConfigurationError("TELEGRAM_WEBHOOK_URL must be an HTTPS URL")
     if not TELEGRAM_WEBHOOK_SECRET:
         raise ConfigurationError("Missing required environment variable: TELEGRAM_WEBHOOK_SECRET")
+    if API_TIMEOUT_SECONDS < 10 or API_TIMEOUT_SECONDS > 180:
+        raise ConfigurationError("API_TIMEOUT_SECONDS must be between 10 and 180")
+    if AI_REQUEST_TIMEOUT_SECONDS < 5 or AI_REQUEST_TIMEOUT_SECONDS > 180:
+        raise ConfigurationError("AI_REQUEST_TIMEOUT_SECONDS must be between 5 and 180")
+    if TOOL_TIMEOUT_SECONDS < 3 or TOOL_TIMEOUT_SECONDS > 120:
+        raise ConfigurationError("TOOL_TIMEOUT_SECONDS must be between 3 and 120")
+    if MAX_TOOL_ROUNDS < 1 or MAX_TOOL_ROUNDS > 12:
+        raise ConfigurationError("MAX_TOOL_ROUNDS must be between 1 and 12")
+    if MAX_API_MESSAGE_CHARS < 100 or MAX_API_MESSAGE_CHARS > 32000:
+        raise ConfigurationError("MAX_API_MESSAGE_CHARS must be between 100 and 32000")
     if CLOUDFLARE_MCP_TIMEOUT_SECONDS < 3 or CLOUDFLARE_MCP_TIMEOUT_SECONDS > 120:
         raise ConfigurationError("CLOUDFLARE_MCP_TIMEOUT_SECONDS must be between 3 and 120")
     Path(MEMORY_DB_PATH).parent.mkdir(parents=True, exist_ok=True)

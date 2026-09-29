@@ -13,13 +13,20 @@ import sqlite3
 from pathlib import Path
 
 
+def _connect(db_path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
+
+
 class SemanticIndex:
     """SQLite-backed scoped text index with deterministic token similarity."""
 
     def __init__(self, db_path: str):
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(db_path) as conn:
+        with _connect(db_path) as conn:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS semantic_index "
                 "(key TEXT PRIMARY KEY, text TEXT NOT NULL, vector TEXT)"
@@ -39,7 +46,7 @@ class SemanticIndex:
             return
         tokens = sorted(self._tokens(text))
         vector = {token: tokens.count(token) for token in tokens}
-        with sqlite3.connect(self.db_path) as conn:
+        with _connect(self.db_path) as conn:
             conn.execute(
                 "INSERT INTO semantic_index(key,text,vector) VALUES(?,?,?) "
                 "ON CONFLICT(key) DO UPDATE SET text=excluded.text, vector=excluded.vector",
@@ -49,7 +56,7 @@ class SemanticIndex:
     def delete_prefix(self, prefix: str) -> None:
         if not prefix:
             return
-        with sqlite3.connect(self.db_path) as conn:
+        with _connect(self.db_path) as conn:
             conn.execute(
                 "DELETE FROM semantic_index WHERE key LIKE ?",
                 (prefix + "%",),
@@ -66,7 +73,7 @@ class SemanticIndex:
         if not qt:
             return []
 
-        with sqlite3.connect(self.db_path) as conn:
+        with _connect(self.db_path) as conn:
             if prefix is None:
                 rows = conn.execute(
                     "SELECT key,text,vector FROM semantic_index"
