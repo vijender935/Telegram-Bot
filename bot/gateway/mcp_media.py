@@ -95,7 +95,6 @@ async def send_mcp_images(
             else:
                 await update.message.reply_photo(
                     photo=io.BytesIO(payload),
-                    filename=filename,
                     caption=caption if sent == 0 else None,
                 )
             sent += 1
@@ -113,5 +112,7 @@ async def send_mcp_images(
                 sent += 1
             except Exception:
                 logger.exception("MCP image delivery failed index=%s", index)
+        except Exception:
+            logger.exception("MCP image delivery failed index=%s", index)
 
     return sent
