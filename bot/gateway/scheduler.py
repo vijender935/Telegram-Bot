@@ -58,6 +58,7 @@ async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
                     "session_summary": ctx["session_summary_text"],
                     "memory_context": ctx["memory_context_text"],
                     "last_media": ctx["last_media_text"],
+                    "response_policy": "mode=conversation; language=hinglish; length=adaptive; ask_followup=False; explain=False",
                     "chat_history": history[-5:],
                 }
             )
@@ -67,7 +68,6 @@ async def proactive_ping(context: ContextTypes.DEFAULT_TYPE):
                 logger.info("Sent proactive ping to %s", user_id)
         except Exception:
             logger.exception("Proactive ping failed for %s", user_id)
-
 
 
 def start_scheduler(app) -> None:
